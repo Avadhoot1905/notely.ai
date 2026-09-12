@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../services/filesystem/file_system_service.dart';
+import '../../services/filesystem/file_watcher_service.dart';
 import '../../services/filesystem/fs_node.dart';
 
 /// Outcome of a drag/drop (or programmatic) move.
@@ -34,10 +35,16 @@ class MoveResult {
 }
 
 class ExplorerController extends ChangeNotifier {
-  ExplorerController({FileSystemService? fs})
-    : _fs = fs ?? const FileSystemService();
+  ExplorerController({FileSystemService? fs, FileWatcherService? watcher})
+    : _fs = fs ?? const FileSystemService(),
+      _watcher = watcher ?? const NoopFileWatcherService();
 
   final FileSystemService _fs;
+
+  /// Watches the open stash for external changes. Defaults to a no-op (tests/headless); the app
+  /// injects a real [IoFileWatcherService] so edits made outside Notely refresh the tree.
+  final FileWatcherService _watcher;
+  FileWatchHandle? _watch;
 
   String? _rootPath;
   List<FsNode> _roots = const [];
@@ -77,7 +84,17 @@ class ExplorerController extends ChangeNotifier {
     _targetDir = rootPath;
     _selectedPath = null;
     _expanded.clear();
+    // Re-point the external-change watcher at the new stash root.
+    _watch?.cancel();
+    _watch = _watcher.watch(rootPath, _onExternalChange);
     await refresh();
+  }
+
+  /// A change was detected on disk outside Notely (or as an aftershock of our own op) — re-read
+  /// the tree. [refresh] preserves valid expansion/selection, so this is safe to call freely.
+  void _onExternalChange() {
+    if (_rootPath == null) return;
+    refresh();
   }
 
   /// Re-read the tree from disk, preserving expansion/selection where still valid.
@@ -283,7 +300,15 @@ class ExplorerController extends ChangeNotifier {
     }
     final name = renameTo ?? p.basename(source);
     final target = p.join(destDir, name);
-    if (!replace && !p.equals(target, source) && await _fs.exists(target)) {
+    // A case-only rename (e.g. "notes.md" → "Notes.md") resolves to the same entry on a
+    // case-insensitive filesystem; it is not a collision. Compare case-insensitively to detect it.
+    final caseOnly =
+        !p.equals(target, source) &&
+        p.equals(target.toLowerCase(), source.toLowerCase());
+    if (!replace &&
+        !caseOnly &&
+        !p.equals(target, source) &&
+        await _fs.exists(target)) {
       return MoveResult(MoveStatus.collision, conflictTarget: target);
     }
     try {
@@ -407,5 +432,12 @@ class ExplorerController extends ChangeNotifier {
   String _remap(String path, String from, String to) {
     if (p.equals(path, from)) return to;
     return p.join(to, p.relative(path, from: from));
+  }
+
+  @override
+  void dispose() {
+    _watch?.cancel();
+    _watch = null;
+    super.dispose();
   }
 }

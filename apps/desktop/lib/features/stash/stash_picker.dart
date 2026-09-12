@@ -5,8 +5,6 @@
 // plus actions to create a new stash or open an existing folder. When a stash is already open
 // (switching), the modal can be dismissed with the ✕ button, Esc, or a backdrop tap.
 
-import 'dart:io';
-
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +13,7 @@ import 'package:path/path.dart' as p;
 import '../../app/app_scope.dart';
 import '../../app/theme.dart';
 import '../../platform/platform_ui.dart';
+import '../../services/filesystem/path_service.dart';
 import '../../services/stash/stash_store.dart';
 import 'stash_switcher.dart' show StashAvatar;
 
@@ -403,9 +402,7 @@ class _RightPaneState extends State<_RightPane> {
   @override
   void initState() {
     super.initState();
-    final home =
-        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
-    if (home != null) _parent = p.join(home, 'Documents');
+    _parent = const PathService().defaultStashParent();
   }
 
   @override

@@ -17,6 +17,7 @@ import '../features/listening/listening_state.dart';
 import '../features/stash/stash_picker.dart';
 import '../features/stash/stash_state.dart';
 import '../features/workspace/workspace_shell.dart';
+import '../services/filesystem/file_watcher_service.dart';
 import 'app_scope.dart';
 import 'theme.dart';
 import 'theme_controller.dart';
@@ -30,7 +31,9 @@ class NotelyApp extends StatefulWidget {
 
 class _NotelyAppState extends State<NotelyApp> {
   late final StashController _stash = StashController();
-  late final ExplorerController _explorer = ExplorerController();
+  late final ExplorerController _explorer = ExplorerController(
+    watcher: const IoFileWatcherService(),
+  );
   late final EditorController _editor = EditorController();
   late final ListeningController _listening = ListeningController();
   late final ThemeController _theme = ThemeController();

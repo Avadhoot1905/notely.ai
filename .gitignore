@@ -9,9 +9,9 @@ apps/desktop/.flutter-plugins-dependencies
 apps/desktop/build/
 apps/desktop/.pub-cache/
 apps/desktop/.pub/
+# Notely desktop targets macOS, Windows and Linux; mobile/web platform folders are not shipped.
 apps/desktop/ios/
 apps/desktop/android/
-apps/desktop/linux/
 apps/desktop/web/
 **/Flutter/ephemeral/
 **/Pods/

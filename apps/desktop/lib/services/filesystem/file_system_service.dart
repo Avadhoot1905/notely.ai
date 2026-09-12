@@ -104,14 +104,18 @@ class FileSystemService {
     }
     final dest = p.join(p.dirname(path), name);
     if (p.equals(dest, path)) return path; // unchanged
-    if (await exists(dest)) {
+    // A case-only rename ("notes.md" → "Notes.md") targets the *same* entry on a
+    // case-insensitive filesystem (macOS/APFS default, Windows/NTFS), so exists(dest) would be
+    // true and falsely report a collision. Detect it and let the OS rename in place instead.
+    final caseOnly = _isCaseOnlyRename(path, dest);
+    if (!caseOnly && await exists(dest)) {
       throw FileSystemException(
         'A ${isDir ? 'folder' : 'file'} named "$name" already exists',
         dest,
       );
     }
     final entity = isDir ? Directory(path) : File(path);
-    final renamed = await entity.rename(dest);
+    final renamed = await _renameEntity(entity, dest, caseOnly: caseOnly);
     return renamed.path;
   }
 
@@ -128,7 +132,10 @@ class FileSystemService {
         ? (isDir ? renameTo.trim() : _ensureMarkdown(renameTo))
         : p.basename(source);
     final dest = p.join(destDir, name);
-    if (!p.equals(dest, source) && await exists(dest)) {
+    // See rename(): a case-only rename targets the same entry on case-insensitive filesystems,
+    // so it must not be treated as a collision (and must not delete "the existing item").
+    final caseOnly = _isCaseOnlyRename(source, dest);
+    if (!caseOnly && !p.equals(dest, source) && await exists(dest)) {
       if (!replace) {
         throw FileSystemException(
           'An item named "$name" already exists here',
@@ -138,7 +145,7 @@ class FileSystemService {
       await delete(dest);
     }
     final entity = isDir ? Directory(source) : File(source);
-    final moved = await entity.rename(dest);
+    final moved = await _renameEntity(entity, dest, caseOnly: caseOnly);
     return moved.path;
   }
 
@@ -164,14 +171,48 @@ class FileSystemService {
       // a non-zero exit code even on success, so we don't inspect it here.
       await Process.run('explorer', ['/select,${p.normalize(path)}']);
     } else if (Platform.isLinux) {
-      final target = await Directory(path).exists() ? path : p.dirname(path);
-      await Process.run('xdg-open', [target]);
+      await _revealOnLinux(path);
     } else {
       throw const FileSystemException(
         'Reveal is not supported on this platform',
       );
     }
   }
+
+  /// Reveal [path] on Linux without assuming a specific desktop environment or file manager.
+  ///
+  /// The freedesktop `org.freedesktop.FileManager1` D-Bus interface is the portable, DE-agnostic
+  /// way to *highlight* a file (Nautilus/GNOME, Dolphin/KDE, Nemo, … all implement it). We try it
+  /// first via `gdbus`, and fall back to opening the containing folder with `xdg-open` when the
+  /// interface, gdbus, or a session bus isn't available (e.g. a minimal/headless environment).
+  Future<void> _revealOnLinux(String path) async {
+    final isDir = await Directory(path).exists();
+    if (!isDir) {
+      final uri = Uri.file(path).toString();
+      try {
+        final result = await Process.run('gdbus', [
+          'call',
+          '--session',
+          '--dest',
+          'org.freedesktop.FileManager1',
+          '--object-path',
+          '/org/freedesktop/FileManager1',
+          '--method',
+          'org.freedesktop.FileManager1.ShowItems',
+          '[$_dq$uri$_dq]',
+          '',
+        ]);
+        if (result.exitCode == 0) return;
+      } catch (_) {
+        // gdbus missing or no session bus — fall through to xdg-open.
+      }
+    }
+    // Fallback: open the folder itself (can't highlight the specific item).
+    final target = isDir ? path : p.dirname(path);
+    await Process.run('xdg-open', [target]);
+  }
+
+  static const _dq = '"';
 
   /// Open [path] with the platform's default application (e.g. an image in Preview). Unlike
   /// [revealInFileManager], this opens the file itself rather than highlighting it.
@@ -220,6 +261,37 @@ class FileSystemService {
       i++;
     }
     return candidate;
+  }
+
+  /// True when [dest] differs from [source] only by letter case within the same parent — i.e.
+  /// the same on-disk entry on a case-insensitive filesystem. The paths must be different
+  /// case-sensitively (a true no-op is handled by the caller) but equal case-insensitively.
+  static bool _isCaseOnlyRename(String source, String dest) {
+    if (p.equals(source, dest)) return false; // identical → not a case change
+    return p.equals(
+      source.toLowerCase(),
+      dest.toLowerCase(),
+    ); // same path, different case
+  }
+
+  /// Rename [entity] to [dest]. A case-only rename on a case-insensitive filesystem can fail or
+  /// no-op on some OSes when renaming directly, so it is performed via a unique temporary name
+  /// first. Case-sensitive filesystems (typical Linux) are unaffected and take the direct path.
+  Future<FileSystemEntity> _renameEntity(
+    FileSystemEntity entity,
+    String dest, {
+    required bool caseOnly,
+  }) async {
+    if (!caseOnly) return entity.rename(dest);
+    final parent = p.dirname(dest);
+    var temp = p.join(parent, '.${p.basename(dest)}.notely-tmp');
+    var i = 0;
+    while (await exists(temp)) {
+      temp = p.join(parent, '.${p.basename(dest)}.notely-tmp$i');
+      i++;
+    }
+    final viaTemp = await entity.rename(temp);
+    return viaTemp.rename(dest);
   }
 
   String _ensureMarkdown(String rawName) {

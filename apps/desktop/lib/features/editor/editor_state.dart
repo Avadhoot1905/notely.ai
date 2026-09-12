@@ -31,6 +31,9 @@ class EditorController extends ChangeNotifier {
   static const Duration _autosaveDebounce = Duration(milliseconds: 800);
 
   String? _openPath;
+  /// Line ending the open file used on disk. Editing happens in LF in-memory; saves restore this
+  /// so a Windows-authored CRLF file is not silently rewritten to LF (and vice versa).
+  String _eol = '\n';
   bool _dirty = false;
   bool _loading = false;
   String? _error;
@@ -64,8 +67,11 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
     try {
       // Notely edits in LF: normalize any CRLF/CR on read so Windows-authored files don't carry
-      // stray carriage returns into the editor, and saves stay consistently LF across platforms.
-      final content = _normalizeNewlines(await _fs.readFile(path));
+      // stray carriage returns into the editor. The file's original line ending is remembered
+      // and restored on save (see [_eol]) so we never silently convert CRLF ↔ LF.
+      final raw = await _fs.readFile(path);
+      _eol = raw.contains('\r\n') ? '\r\n' : '\n';
+      final content = _normalizeNewlines(raw);
       _openPath = path;
       _suppressSave(() {
         text.text = content;
@@ -144,7 +150,7 @@ class EditorController extends ChangeNotifier {
     _saveTimer?.cancel();
     if (_openPath == null || !_dirty) return;
     try {
-      await _fs.writeFile(_openPath!, text.text);
+      await _fs.writeFile(_openPath!, _applyEol(text.text));
       _dirty = false;
       _error = null;
     } on FileSystemException catch (e) {
@@ -153,9 +159,13 @@ class EditorController extends ChangeNotifier {
     }
   }
 
-  /// Collapse CRLF and lone CR to LF. Notely's on-disk policy is LF (see [open]).
+  /// Collapse CRLF and lone CR to LF for in-memory editing (see [open]).
   static String _normalizeNewlines(String s) =>
       s.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+
+  /// Restore the open file's on-disk line ending ([_eol]) before writing. LF-origin files are
+  /// returned unchanged; CRLF-origin files get their carriage returns back.
+  String _applyEol(String s) => _eol == '\n' ? s : s.replaceAll('\n', '\r\n');
 
   bool _suppressing = false;
   void _suppressSave(VoidCallback fn) {
