@@ -26,10 +26,21 @@ class StashController extends ChangeNotifier {
   bool _restoring = true;
   bool _pickerRequested = false;
   List<StashConfig> _recents = const [];
+  String? _error;
 
   String? get name => _name;
   String? get path => _path;
   bool get isOpen => _name != null && _path != null;
+
+  /// A user-facing problem opening a stash (e.g. the folder no longer exists / is inaccessible),
+  /// surfaced in the picker. Cleared on the next successful action.
+  String? get error => _error;
+
+  void clearError() {
+    if (_error == null) return;
+    _error = null;
+    notifyListeners();
+  }
 
   /// True while the initial restore-from-disk is in flight (avoids flashing the picker).
   bool get isRestoring => _restoring;
@@ -57,8 +68,19 @@ class StashController extends ChangeNotifier {
     }
   }
 
-  /// Open a stash and persist it as the last-used one (and prepend it to recents).
+  /// Open a stash and persist it as the last-used one (and prepend it to recents). Validates the
+  /// folder still exists first — a recent stash may point at a deleted folder or a disconnected
+  /// drive (common on Windows) — surfacing [error] and keeping the picker up instead of entering
+  /// a broken workspace.
   Future<void> open({required String name, required String path}) async {
+    if (!await _fs.exists(path)) {
+      _error =
+          'This stash folder could not be found. It may have been moved, '
+          'deleted, or is on a drive that isn’t connected.';
+      notifyListeners();
+      return;
+    }
+    _error = null;
     _name = name;
     _path = path;
     _pickerRequested = false;
@@ -108,7 +130,7 @@ class StashController extends ChangeNotifier {
 
   /// Remove a stash from the recents list (does not touch the folder on disk).
   Future<void> removeRecent(String path) async {
-    _recents = _recents.where((c) => c.path != path).toList();
+    _recents = _recents.where((c) => !p.equals(c.path, path)).toList();
     notifyListeners();
     try {
       await _store.saveRecents(_recents);
@@ -116,7 +138,12 @@ class StashController extends ChangeNotifier {
   }
 
   List<StashConfig> _mergeRecent(StashConfig config) {
-    final next = [config, ..._recents.where((c) => c.path != config.path)];
+    // Dedupe with path-aware equality so Windows' case-insensitive paths ("C:\X" vs "c:\x")
+    // don't create duplicate recents entries.
+    final next = [
+      config,
+      ..._recents.where((c) => !p.equals(c.path, config.path)),
+    ];
     return next.take(_maxRecents).toList();
   }
 }

@@ -153,12 +153,16 @@ class FileSystemService {
     if (await file.exists()) await file.delete();
   }
 
-  /// Reveal [path] in the platform file manager (Finder / Explorer / default handler).
+  /// Reveal [path] in the platform file manager (Finder / File Explorer / default handler),
+  /// highlighting the item where the OS supports it.
   Future<void> revealInFileManager(String path) async {
     if (Platform.isMacOS) {
       await Process.run('open', ['-R', path]);
     } else if (Platform.isWindows) {
-      await Process.run('explorer', ['/select,', path]);
+      // Explorer requires the flag and path as a SINGLE token ("/select,C:\dir\file"); passing
+      // them as two arguments splits on the space and fails to highlight. Explorer also returns
+      // a non-zero exit code even on success, so we don't inspect it here.
+      await Process.run('explorer', ['/select,${p.normalize(path)}']);
     } else if (Platform.isLinux) {
       final target = await Directory(path).exists() ? path : p.dirname(path);
       await Process.run('xdg-open', [target]);

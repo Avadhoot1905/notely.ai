@@ -63,7 +63,9 @@ class EditorController extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      final content = await _fs.readFile(path);
+      // Notely edits in LF: normalize any CRLF/CR on read so Windows-authored files don't carry
+      // stray carriage returns into the editor, and saves stay consistently LF across platforms.
+      final content = _normalizeNewlines(await _fs.readFile(path));
       _openPath = path;
       _suppressSave(() {
         text.text = content;
@@ -150,6 +152,10 @@ class EditorController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Collapse CRLF and lone CR to LF. Notely's on-disk policy is LF (see [open]).
+  static String _normalizeNewlines(String s) =>
+      s.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 
   bool _suppressing = false;
   void _suppressSave(VoidCallback fn) {

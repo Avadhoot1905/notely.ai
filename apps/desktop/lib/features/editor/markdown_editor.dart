@@ -16,6 +16,7 @@ import 'package:path/path.dart' as p;
 
 import '../../app/app_scope.dart';
 import '../../app/theme.dart';
+import '../../platform/platform_ui.dart';
 import '../../services/filesystem/fs_node.dart';
 
 class MarkdownEditor extends StatelessWidget {
@@ -125,7 +126,8 @@ class MarkdownEditor extends StatelessWidget {
                 right: 14,
                 child: _EditorAction(
                   icon: Icons.image_outlined,
-                  tip: 'Insert image  (⇧⌘I)',
+                  tip:
+                      'Insert image  (${PlatformUi.shortcutHint('I', shift: true)})',
                   onTap: () => insertImage(context),
                 ),
               ),

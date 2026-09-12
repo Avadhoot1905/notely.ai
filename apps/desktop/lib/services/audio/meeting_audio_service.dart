@@ -10,6 +10,7 @@
 // stream is opened (proving permission + capture work) and drained; no processing happens.
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
@@ -67,25 +68,39 @@ abstract class MeetingAudioService {
   Future<void> dispose();
 }
 
-/// Microphone capture via the `record` package. Opens a PCM stream to prove capture works,
-/// then drains it (no bytes are stored or processed yet — that's the Rust engine's job later).
+/// Microphone capture via the `record` package (works on macOS and Windows alike). Opens a PCM
+/// stream to prove capture works, then drains it (no bytes are stored or processed yet — that's
+/// the Rust engine's job later).
 ///
 /// System audio: `record` captures input devices (microphone), NOT the system output mix.
-/// Capturing what the *other* participants say requires an OS-level loopback mechanism —
-/// on macOS that's ScreenCaptureKit audio capture (macOS 13+) or a virtual audio device,
-/// which must be implemented natively (Swift plugin or the Rust engine). Until that exists we
-/// report system audio as unsupported rather than pretending it is captured.
+/// Capturing what the *other* participants say requires an OS-level loopback mechanism, and the
+/// mechanism differs per platform — macOS uses ScreenCaptureKit audio capture (macOS 13+) or a
+/// virtual audio device; Windows uses WASAPI loopback; Linux uses a PulseAudio/PipeWire monitor
+/// source. All of these must be implemented natively (a platform plugin or the Rust engine).
+/// Until that exists we report system audio as unsupported — with a platform-appropriate note —
+/// rather than pretending it is captured. The application-level behaviour stays identical.
+String _systemAudioNoteForPlatform() {
+  if (Platform.isMacOS) {
+    return 'System/call audio needs native loopback capture '
+        '(macOS ScreenCaptureKit or the Rust engine).';
+  }
+  if (Platform.isWindows) {
+    return 'System/call audio needs native loopback capture '
+        '(Windows WASAPI loopback or the Rust engine).';
+  }
+  return 'System/call audio needs native loopback capture '
+      '(a PulseAudio/PipeWire monitor or the Rust engine).';
+}
+
 class RecordMeetingAudioService implements MeetingAudioService {
   final AudioRecorder _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _micSub;
   int _bytesCaptured = 0;
 
-  AudioCapabilities _capabilities = const AudioCapabilities(
+  AudioCapabilities _capabilities = AudioCapabilities(
     microphone: AudioSourceStatus.permissionRequired,
     systemAudio: AudioSourceStatus.unsupported,
-    systemAudioNote:
-        'System/call audio needs native loopback capture '
-        '(macOS ScreenCaptureKit or the Rust engine).',
+    systemAudioNote: _systemAudioNoteForPlatform(),
   );
 
   @override

@@ -5,6 +5,7 @@
 // above the status bar, mirroring the workspace/account switchers in VS Code / editors.
 
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../../app/app_scope.dart';
 import '../../app/theme.dart';
@@ -171,10 +172,13 @@ class _StashSwitcherState extends State<StashSwitcher> {
     );
   }
 
+  /// Abbreviate a path to its last two segments (e.g. "…/Documents/Work"), using the platform's
+  /// own separator so Windows paths read "…\Documents\Work" rather than with forward slashes.
   String _shortenPath(String path) {
-    final home = Uri.file(path).pathSegments;
-    if (home.length > 3) {
-      return '…/${home.sublist(home.length - 2).join('/')}';
+    final segments = p.split(path);
+    if (segments.length > 3) {
+      final tail = segments.sublist(segments.length - 2).join(p.separator);
+      return '…${p.separator}$tail';
     }
     return path;
   }

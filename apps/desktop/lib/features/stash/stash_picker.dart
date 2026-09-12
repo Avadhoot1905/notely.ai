@@ -14,6 +14,7 @@ import 'package:path/path.dart' as p;
 
 import '../../app/app_scope.dart';
 import '../../app/theme.dart';
+import '../../platform/platform_ui.dart';
 import '../../services/stash/stash_store.dart';
 import 'stash_switcher.dart' show StashAvatar;
 
@@ -181,9 +182,43 @@ class _RecentList extends StatelessWidget {
                         ),
                       ),
               ),
+              if (stash.error != null) _StashError(message: stash.error!),
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// Inline error shown in the picker when a stash can't be opened (missing folder / drive).
+class _StashError extends StatelessWidget {
+  const _StashError({required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: t.danger.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(NotelyDims.radius),
+        border: Border.all(color: t.danger.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, size: 14, color: t.danger),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(fontSize: 11.5, height: 1.35, color: t.danger),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -223,7 +258,7 @@ class _RecentRowState extends State<_RecentRow> {
         side: BorderSide(color: t.borderStrong),
       ),
       items: [
-        _menuItem(t, 0, Icons.folder_open_outlined, 'Reveal in Finder'),
+        _menuItem(t, 0, Icons.folder_open_outlined, PlatformUi.revealLabel),
         _menuItem(t, 1, Icons.close_rounded, 'Remove from list', danger: true),
       ],
     );

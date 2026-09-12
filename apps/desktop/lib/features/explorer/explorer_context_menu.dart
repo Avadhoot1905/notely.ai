@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../platform/platform_ui.dart';
 
 enum ExplorerAction {
   open,
@@ -84,7 +85,7 @@ Future<ExplorerAction?> showExplorerContextMenu({
         item(
           ExplorerAction.reveal,
           Icons.folder_open_outlined,
-          'Reveal in Finder',
+          PlatformUi.revealLabel,
         ),
       ]);
     case ExplorerTargetKind.file:
@@ -102,7 +103,7 @@ Future<ExplorerAction?> showExplorerContextMenu({
         item(
           ExplorerAction.reveal,
           Icons.folder_open_outlined,
-          'Reveal in Finder',
+          PlatformUi.revealLabel,
         ),
       ]);
     case ExplorerTargetKind.empty:
