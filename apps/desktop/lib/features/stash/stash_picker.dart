@@ -1,10 +1,14 @@
 // Stash picker modal — the launch experience.
 //
 // Inspired by Obsidian's "Open Vault": a centered dialog over a subdued workspace. "Choose
-// Folder" is mocked (it cycles through a few plausible paths rather than invoking a native
-// picker); "Open Stash" transitions into the workspace.
+// Folder" opens the real native/system folder picker; "Open Stash" points the workspace at the
+// chosen directory and persists it.
 
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../../app/app_scope.dart';
 import '../../app/theme.dart';
@@ -18,24 +22,25 @@ class StashPicker extends StatefulWidget {
 
 class _StashPickerState extends State<StashPicker>
     with SingleTickerProviderStateMixin {
-  late final TextEditingController _name = TextEditingController(
-    text: StashControllerDefaults.name,
-  );
-  String _path = StashControllerDefaults.path;
-  int _pathIdx = 0;
+  final TextEditingController _name = TextEditingController();
+  String? _path;
 
   late final AnimationController _anim = AnimationController(
     vsync: this,
     duration: NotelyDims.panelAnim,
   )..forward();
 
-  // Mocked folder choices cycled by "Choose Folder".
-  static const _mockPaths = [
-    '~/Documents/Notely/Work',
-    '~/Documents/Notely/Personal',
-    '~/Dev/notes/research',
-    '~/Vaults/team',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    // Suggest a sensible default location without touching disk until the user picks.
+    final home =
+        Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+    if (home != null) {
+      _path = p.join(home, 'Documents');
+      _name.text = 'Notely';
+    }
+  }
 
   @override
   void dispose() {
@@ -44,18 +49,30 @@ class _StashPickerState extends State<StashPicker>
     super.dispose();
   }
 
-  void _chooseFolder() {
+  Future<void> _chooseFolder() async {
+    final selected = await getDirectoryPath(
+      confirmButtonText: 'Choose',
+      initialDirectory: _path,
+    );
+    // Cancelled → remain on the picker with the previous selection.
+    if (selected == null) return;
     setState(() {
-      _pathIdx = (_pathIdx + 1) % _mockPaths.length;
-      _path = _mockPaths[_pathIdx];
-      final leaf = _path.split('/').last;
+      _path = selected;
+      final leaf = p.basename(selected);
       if (leaf.isNotEmpty) _name.text = leaf;
     });
   }
 
-  void _open() {
-    final name = _name.text.trim().isEmpty ? 'Untitled' : _name.text.trim();
-    AppScope.of(context).stash.open(name: name, path: _path);
+  Future<void> _open() async {
+    final path = _path;
+    if (path == null) {
+      await _chooseFolder();
+      return;
+    }
+    final name = _name.text.trim().isEmpty
+        ? p.basename(path)
+        : _name.text.trim();
+    await AppScope.of(context).stash.open(name: name, path: path);
   }
 
   @override
@@ -128,12 +145,14 @@ class _StashPickerState extends State<StashPicker>
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    _path,
-                    style: const TextStyle(
+                    _path ?? 'No folder chosen yet',
+                    style: TextStyle(
                       fontFamily: kEditorFont,
                       fontFamilyFallback: kEditorFontFallback,
                       fontSize: 12.5,
-                      color: NotelyColors.textSecondary,
+                      color: _path == null
+                          ? NotelyColors.textFaint
+                          : NotelyColors.textSecondary,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -250,10 +269,4 @@ class _StashPickerState extends State<StashPicker>
       ),
     );
   }
-}
-
-/// Re-exported defaults so the picker doesn't import the controller's private constants path.
-abstract final class StashControllerDefaults {
-  static const path = '~/Documents/Notely/Work';
-  static const name = 'Work';
 }

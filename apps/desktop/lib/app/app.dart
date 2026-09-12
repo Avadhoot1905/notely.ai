@@ -2,8 +2,8 @@
 // Stash picker and the workspace.
 //
 // `app/` holds app-wide concerns (root widget, theme, shared scope). Screens live under
-// `features/`. The app talks to the Rust engine only through `lib/ipc` — none of which is
-// wired up yet; this is an interactive frontend mockup backed by in-memory mock state.
+// `features/`. Controllers are wired to real services (filesystem, audio, transcript,
+// summary); the Rust engine (`lib/ipc`) is still the intended future home for ASR/summarise.
 
 import 'package:flutter/material.dart';
 
@@ -29,8 +29,29 @@ class _NotelyAppState extends State<NotelyApp> {
   late final EditorController _editor = EditorController();
   late final ListeningController _listening = ListeningController();
 
+  String? _loadedRoot;
+
+  @override
+  void initState() {
+    super.initState();
+    // Keep the explorer's root in sync with the open stash, and restore the last stash.
+    _stash.addListener(_syncExplorerRoot);
+    _stash.restore();
+  }
+
+  void _syncExplorerRoot() {
+    final path = _stash.path;
+    if (path != null && path != _loadedRoot) {
+      _loadedRoot = path;
+      _explorer.setRoot(path);
+    } else if (path == null) {
+      _loadedRoot = null;
+    }
+  }
+
   @override
   void dispose() {
+    _stash.removeListener(_syncExplorerRoot);
     _stash.dispose();
     _explorer.dispose();
     _editor.dispose();
@@ -70,7 +91,8 @@ class _AppGate extends StatelessWidget {
             // The workspace is always mounted so it reads as "subdued behind the modal",
             // matching the Obsidian open-vault feel. It's inert until a stash is open.
             const WorkspaceShell(),
-            if (!stash.isOpen) const StashPicker(),
+            // While restoring the persisted stash, keep the picker hidden to avoid a flash.
+            if (!stash.isOpen && !stash.isRestoring) const StashPicker(),
           ],
         );
       },

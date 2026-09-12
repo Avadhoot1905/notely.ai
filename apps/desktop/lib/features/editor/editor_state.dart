@@ -1,20 +1,38 @@
-// Editor state.
+// Editor state, connected to real files.
 //
-// Holds the markdown body for the open note in a TextEditingController and caches per-note
-// edits in memory so switching files preserves unsaved changes. No persistence — the engine
-// will own saving to disk later.
+// Opens a file by path (reading from disk), tracks edits in a TextEditingController, and
+// autosaves on a short debounce so typing stays snappy (no write-per-keystroke). Switching
+// files flushes pending saves first so unsaved content is never lost.
+
+import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 
-import '../../mock/mock_notes.dart';
+import '../../services/filesystem/file_system_service.dart';
 
 class EditorController extends ChangeNotifier {
-  final TextEditingController text = TextEditingController();
-  final Map<String, String> _edits = {};
+  EditorController({FileSystemService? fs})
+    : _fs = fs ?? const FileSystemService() {
+    text.addListener(_onChanged);
+  }
 
-  String? _openNoteId;
-  String? get openNoteId => _openNoteId;
-  bool get hasOpenNote => _openNoteId != null;
+  final FileSystemService _fs;
+  final TextEditingController text = TextEditingController();
+
+  static const Duration _autosaveDebounce = Duration(milliseconds: 800);
+
+  String? _openPath;
+  bool _dirty = false;
+  bool _loading = false;
+  String? _error;
+  Timer? _saveTimer;
+
+  String? get openPath => _openPath;
+  bool get hasOpenNote => _openPath != null;
+  bool get isDirty => _dirty;
+  bool get isLoading => _loading;
+  String? get error => _error;
 
   /// Current 1-based caret line/column, for the status bar.
   int _line = 1;
@@ -22,24 +40,73 @@ class EditorController extends ChangeNotifier {
   int get line => _line;
   int get col => _col;
 
-  EditorController() {
-    text.addListener(_onChanged);
+  /// Open [path], flushing any pending save for the previously open file first.
+  Future<void> open(String path) async {
+    if (_openPath == path) return;
+    await _flushSave();
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final content = await _fs.readFile(path);
+      _openPath = path;
+      _suppressSave(() {
+        text.text = content;
+        text.selection = TextSelection.collapsed(offset: content.length);
+      });
+      _dirty = false;
+    } on FileSystemException catch (e) {
+      _error = 'Could not open file: ${e.message}';
+    } finally {
+      _loading = false;
+      _recomputeCaret();
+      notifyListeners();
+    }
   }
 
-  void open(String noteId) {
-    if (_openNoteId == noteId) return;
-    // Stash edits from the previously open note.
-    if (_openNoteId != null) _edits[_openNoteId!] = text.text;
-    _openNoteId = noteId;
-    text.text = _edits[noteId] ?? mockNotes[noteId] ?? '';
-    text.selection = TextSelection.collapsed(offset: text.text.length);
+  /// Replace the open note's content programmatically (e.g. a generated summary) and persist
+  /// immediately so the on-disk file matches what the editor shows.
+  Future<void> setContent(String markdown) async {
+    if (_openPath == null) return;
+    _suppressSave(() {
+      text.text = markdown;
+      text.selection = TextSelection.collapsed(offset: markdown.length);
+    });
+    _dirty = true; // force the programmatic write (listener was suppressed)
+    await saveNow();
     _recomputeCaret();
     notifyListeners();
   }
 
+  /// Flush the current buffer to disk now.
+  Future<void> saveNow() async {
+    _saveTimer?.cancel();
+    if (_openPath == null || !_dirty) return;
+    try {
+      await _fs.writeFile(_openPath!, text.text);
+      _dirty = false;
+      _error = null;
+    } on FileSystemException catch (e) {
+      _error = 'Could not save file: ${e.message}';
+      notifyListeners();
+    }
+  }
+
+  bool _suppressing = false;
+  void _suppressSave(VoidCallback fn) {
+    _suppressing = true;
+    fn();
+    _suppressing = false;
+  }
+
+  Future<void> _flushSave() => saveNow();
+
   void _onChanged() {
-    if (_openNoteId != null) _edits[_openNoteId!] = text.text;
     _recomputeCaret();
+    if (_suppressing || _openPath == null) return;
+    _dirty = true;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(_autosaveDebounce, saveNow);
   }
 
   void _recomputeCaret() {
@@ -57,8 +124,15 @@ class EditorController extends ChangeNotifier {
     }
   }
 
+  void clearError() {
+    if (_error == null) return;
+    _error = null;
+    notifyListeners();
+  }
+
   @override
   void dispose() {
+    _saveTimer?.cancel();
     text.removeListener(_onChanged);
     text.dispose();
     super.dispose();

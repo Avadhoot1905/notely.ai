@@ -1,14 +1,14 @@
-// The explorer file tree.
+// The explorer file tree, backed by the real Stash filesystem.
 //
-// Flattens the [FileNode] tree into visible rows based on which folders are expanded, and
-// renders them as compact [FileTreeItem]s. When a filename filter is active, it shows all
-// notes whose name matches (folders implicitly expanded).
+// Flattens the loaded [FsNode] tree into visible rows based on which folders are expanded, and
+// renders them as compact [FileTreeItem]s. A filename filter flattens to matching Markdown
+// files. Node identity is the absolute path.
 
 import 'package:flutter/material.dart';
 
 import '../../app/app_scope.dart';
 import '../../app/theme.dart';
-import '../../mock/mock_files.dart';
+import '../../services/filesystem/fs_node.dart';
 import 'file_tree_item.dart';
 
 class FileTree extends StatelessWidget {
@@ -25,26 +25,24 @@ class FileTree extends StatelessWidget {
         final rows = <Widget>[];
         final query = explorer.query.trim().toLowerCase();
 
-        void walk(List<FileNode> nodes, int depth, String path) {
+        void walk(List<FsNode> nodes, int depth) {
           for (final node in nodes) {
-            final nodePath = '$path/${node.name}';
-            if (node.isFolder) {
+            if (node.isDirectory) {
               if (query.isEmpty) {
                 rows.add(
                   FileTreeItem(
                     name: node.name,
                     depth: depth,
                     isFolder: true,
-                    isExpanded: explorer.isExpanded(nodePath.substring(1)),
-                    onTap: () => explorer.toggleFolder(nodePath.substring(1)),
+                    isExpanded: explorer.isExpanded(node.path),
+                    onTap: () => explorer.toggleFolder(node.path),
                   ),
                 );
-                if (explorer.isExpanded(nodePath.substring(1))) {
-                  walk(node.children, depth + 1, nodePath);
+                if (explorer.isExpanded(node.path)) {
+                  walk(node.children, depth + 1);
                 }
               } else {
-                // While filtering, flatten: recurse without rendering the folder row.
-                walk(node.children, depth, nodePath);
+                walk(node.children, depth); // flatten while filtering
               }
             } else {
               if (query.isNotEmpty &&
@@ -56,10 +54,10 @@ class FileTree extends StatelessWidget {
                   name: node.name,
                   depth: query.isEmpty ? depth : 0,
                   isFolder: false,
-                  isSelected: explorer.selectedNoteId == node.noteId,
+                  isSelected: explorer.selectedPath == node.path,
                   onTap: () {
-                    explorer.selectNote(node.noteId!);
-                    scope.editor.open(node.noteId!);
+                    explorer.selectFile(node.path);
+                    scope.editor.open(node.path);
                   },
                 ),
               );
@@ -67,14 +65,20 @@ class FileTree extends StatelessWidget {
           }
         }
 
-        walk(explorer.roots, 0, '');
+        walk(explorer.roots, 0);
 
         if (rows.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.all(16),
+          return Padding(
+            padding: const EdgeInsets.all(16),
             child: Text(
-              'No notes match your search.',
-              style: TextStyle(fontSize: 12, color: NotelyColors.textFaint),
+              query.isEmpty
+                  ? 'This stash is empty.\nCreate a note or folder to begin.'
+                  : 'No notes match your search.',
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: NotelyColors.textFaint,
+              ),
             ),
           );
         }

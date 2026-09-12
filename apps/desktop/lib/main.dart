@@ -9,5 +9,7 @@ import 'package:flutter/widgets.dart';
 import 'app/app.dart';
 
 void main() {
+  // Required before using plugins (shared_preferences, record, file_selector).
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const NotelyApp());
 }

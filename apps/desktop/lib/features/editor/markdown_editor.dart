@@ -21,6 +21,18 @@ class MarkdownEditor extends StatelessWidget {
       child: AnimatedBuilder(
         animation: scope.editor,
         builder: (context, _) {
+          if (scope.editor.isLoading) {
+            return const Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: NotelyColors.textFaint,
+                ),
+              ),
+            );
+          }
           if (!scope.editor.hasOpenNote) {
             return const _EmptyState();
           }
@@ -85,9 +97,9 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           InkWell(
-            onTap: () {
-              final id = explorer.createNote('Untitled');
-              editor.open(id);
+            onTap: () async {
+              final path = await explorer.createFile('Untitled');
+              if (path != null) await editor.open(path);
             },
             borderRadius: BorderRadius.circular(NotelyDims.radius),
             child: Container(
