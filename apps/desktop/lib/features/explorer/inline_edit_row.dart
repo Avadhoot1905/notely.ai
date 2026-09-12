@@ -79,17 +79,21 @@ class _InlineEditRowState extends State<InlineEditRow> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Container(
       height: NotelyDims.rowHeight,
       padding: EdgeInsets.only(left: 8.0 + widget.depth * 14, right: 8),
-      color: NotelyColors.raised,
+      decoration: BoxDecoration(
+        color: t.raised,
+        border: Border(left: BorderSide(color: t.accent, width: 2)),
+      ),
       child: Row(
         children: [
           const SizedBox(width: 16),
           Icon(
-            widget.isFolder ? Icons.folder : Icons.description_outlined,
+            widget.isFolder ? Icons.folder_rounded : Icons.article_outlined,
             size: 14,
-            color: NotelyColors.textFaint,
+            color: t.accent,
           ),
           const SizedBox(width: 7),
           Expanded(
@@ -101,18 +105,15 @@ class _InlineEditRowState extends State<InlineEditRow> {
               child: TextField(
                 controller: _controller,
                 focusNode: _focus,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  color: NotelyColors.textPrimary,
-                ),
-                cursorColor: NotelyColors.accent,
+                style: NotelyType.row.copyWith(color: t.textPrimary),
+                cursorColor: t.accent,
                 cursorHeight: 14,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   isDense: true,
                   isCollapsed: true,
                   border: InputBorder.none,
                   hintText: 'name',
-                  hintStyle: TextStyle(color: NotelyColors.textFaint),
+                  hintStyle: TextStyle(color: t.textFaint),
                 ),
                 onSubmitted: (v) => _finish(v.trim().isEmpty ? null : v.trim()),
               ),

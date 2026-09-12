@@ -2,7 +2,8 @@
 //
 // The transcript region does NOT exist in the normal state; it slides in for any active
 // session (listening / paused / reviewing) and the editor reflows to make room. Narrow windows
-// shrink the transcript toward its minimum and keep the editor usable.
+// shrink the transcript toward its minimum and keep the editor usable. All color comes from
+// `context.tokens` so the whole shell re-themes in light/dark with no hard-coded values.
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -22,9 +23,10 @@ class WorkspaceShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scope = AppScope.of(context);
+    final t = context.tokens;
     return _ErrorListener(
       child: Scaffold(
-        backgroundColor: NotelyColors.window,
+        backgroundColor: t.background,
         body: Column(
           children: [
             const _TitleBar(),
@@ -35,7 +37,7 @@ class WorkspaceShell extends StatelessWidget {
                     width: NotelyDims.sidebarWidth,
                     child: _Sidebar(),
                   ),
-                  const _VerticalDivider(),
+                  _VerticalDivider(t),
                   Expanded(
                     child: AnimatedBuilder(
                       animation: scope.listening,
@@ -52,13 +54,11 @@ class WorkspaceShell extends StatelessWidget {
                             return Row(
                               children: [
                                 const Expanded(child: MarkdownEditor()),
-                                // Animate occupied width while the panel stays laid out at a
-                                // fixed width, so its content never reflows during the slide.
                                 ClipRect(
                                   child: AnimatedAlign(
                                     alignment: Alignment.centerLeft,
                                     duration: NotelyDims.panelAnim,
-                                    curve: Curves.easeOutCubic,
+                                    curve: NotelyMotion.curve,
                                     widthFactor: showTranscript ? 1.0 : 0.0,
                                     child: SizedBox(
                                       width: panelW,
@@ -122,20 +122,25 @@ class _ErrorListenerState extends State<_ErrorListener> {
   }
 
   void _check() {
-    final explorerError = _explorer?.error;
-    final editorError = _editor?.error;
-    final message = explorerError ?? editorError;
+    final message = _explorer?.error ?? _editor?.error;
     if (message == null) return;
-    // Defer to after the current build/notify cycle.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final t = context.tokens;
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
         ..showSnackBar(
           SnackBar(
-            content: Text(message, style: const TextStyle(fontSize: 12.5)),
-            backgroundColor: NotelyColors.raised,
+            content: Text(
+              message,
+              style: TextStyle(fontSize: 12.5, color: t.textPrimary),
+            ),
+            backgroundColor: t.raised,
             behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(NotelyDims.radius),
+              side: BorderSide(color: t.danger.withValues(alpha: 0.6)),
+            ),
             width: 420,
             duration: const Duration(seconds: 4),
           ),
@@ -165,30 +170,39 @@ class _TitleBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scope = AppScope.of(context);
+    final t = context.tokens;
     return Container(
       height: NotelyDims.titleBarHeight,
-      decoration: const BoxDecoration(
-        color: NotelyColors.window,
-        border: Border(bottom: BorderSide(color: NotelyColors.border)),
+      decoration: BoxDecoration(
+        color: t.background,
+        border: Border(bottom: BorderSide(color: t.border)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
       child: Row(
         children: [
-          const Icon(Icons.menu, size: 16, color: NotelyColors.textFaint),
-          const SizedBox(width: 14),
+          // Identity mark.
+          Container(
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(
+              color: t.accent,
+              borderRadius: BorderRadius.circular(2.5),
+            ),
+          ),
+          const SizedBox(width: 12),
           AnimatedBuilder(
             animation: scope.stash,
             builder: (context, _) => Text(
               scope.stash.name ?? 'Notely',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
-                color: NotelyColors.textPrimary,
+                color: t.textPrimary,
               ),
             ),
           ),
           const SizedBox(width: 10),
-          Container(width: 1, height: 16, color: NotelyColors.border),
+          _Dot(t),
           const SizedBox(width: 10),
           Expanded(
             child: AnimatedBuilder(
@@ -199,19 +213,102 @@ class _TitleBar extends StatelessWidget {
                   name ?? 'No note open',
                   style: TextStyle(
                     fontSize: 12.5,
-                    color: name == null
-                        ? NotelyColors.textFaint
-                        : NotelyColors.textSecondary,
+                    color: name == null ? t.textFaint : t.textSecondary,
                   ),
                 );
               },
             ),
           ),
-          const Icon(Icons.more_horiz, size: 18, color: NotelyColors.textFaint),
+          const _ThemeToggle(),
+          const SizedBox(width: 2),
+          _ChromeIcon(icon: Icons.more_horiz, tip: 'Menu', onTap: () {}),
         ],
       ),
     );
   }
+}
+
+/// Compact theme control: cycles Dark → Light → System with a reflective icon.
+class _ThemeToggle extends StatelessWidget {
+  const _ThemeToggle();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppScope.of(context).theme;
+    return AnimatedBuilder(
+      animation: theme,
+      builder: (context, _) {
+        final (IconData icon, String label) = switch (theme.mode) {
+          ThemeMode.dark => (Icons.dark_mode_outlined, 'Theme: Dark'),
+          ThemeMode.light => (Icons.light_mode_outlined, 'Theme: Light'),
+          ThemeMode.system => (Icons.brightness_auto_outlined, 'Theme: System'),
+        };
+        return _ChromeIcon(
+          icon: icon,
+          tip: '$label — click to change',
+          onTap: theme.cycle,
+        );
+      },
+    );
+  }
+}
+
+class _ChromeIcon extends StatefulWidget {
+  const _ChromeIcon({
+    required this.icon,
+    required this.tip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tip;
+  final VoidCallback onTap;
+
+  @override
+  State<_ChromeIcon> createState() => _ChromeIconState();
+}
+
+class _ChromeIconState extends State<_ChromeIcon> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Tooltip(
+      message: widget.tip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: NotelyMotion.fast,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: _hover ? t.hover : Colors.transparent,
+              borderRadius: BorderRadius.circular(NotelyDims.radiusSmall),
+            ),
+            child: Icon(
+              widget.icon,
+              size: 16,
+              color: _hover ? t.textSecondary : t.textFaint,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Dot extends StatelessWidget {
+  const _Dot(this.t);
+  final NotelyTokens t;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 3,
+    height: 3,
+    decoration: BoxDecoration(color: t.textFaint, shape: BoxShape.circle),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -244,8 +341,6 @@ class _SidebarState extends State<_Sidebar> {
     });
   }
 
-  // Toolbar create uses the same inline input as the context menu, targeting the currently
-  // selected folder (or the stash root). The editor opens the new file via the inline flow.
   void _newFile() => AppScope.of(context).explorer.beginCreate(isFolder: false);
 
   void _newFolder() =>
@@ -255,39 +350,57 @@ class _SidebarState extends State<_Sidebar> {
   Widget build(BuildContext context) {
     final scope = AppScope.of(context);
     final explorer = scope.explorer;
+    final t = context.tokens;
     return Container(
-      color: NotelyColors.sidebar,
+      color: t.sidebar,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Stash header.
+          // Stash header — workspace identity.
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 14, 6, 8),
             child: Row(
               children: [
+                Container(
+                  width: 5,
+                  height: 5,
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: t.accent,
+                    borderRadius: BorderRadius.circular(1.5),
+                  ),
+                ),
                 Expanded(
                   child: AnimatedBuilder(
                     animation: scope.stash,
                     builder: (context, _) => Text(
                       (scope.stash.name ?? 'Stash').toUpperCase(),
-                      style: const TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 1.0,
-                        fontWeight: FontWeight.w700,
-                        color: NotelyColors.textSecondary,
+                      style: NotelyType.sectionLabel.copyWith(
+                        color: t.textSecondary,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),
-                _iconBtn(Icons.search, 'Search', () => _toggleSearch(explorer)),
-                _iconBtn(Icons.note_add_outlined, 'New note', _newFile),
                 _iconBtn(
+                  t,
+                  Icons.search,
+                  'Search',
+                  () => _toggleSearch(explorer),
+                ),
+                _iconBtn(t, Icons.note_add_outlined, 'New note', _newFile),
+                _iconBtn(
+                  t,
                   Icons.create_new_folder_outlined,
                   'New folder',
                   _newFolder,
                 ),
-                _iconBtn(Icons.swap_horiz, 'Switch Stash', scope.stash.close),
+                _iconBtn(
+                  t,
+                  Icons.swap_horiz,
+                  'Switch Stash',
+                  scope.stash.close,
+                ),
               ],
             ),
           ),
@@ -303,57 +416,89 @@ class _SidebarState extends State<_Sidebar> {
                 controller: _search,
                 autofocus: true,
                 onChanged: explorer.setQuery,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  color: NotelyColors.textPrimary,
-                ),
-                cursorColor: NotelyColors.accent,
+                style: TextStyle(fontSize: 12.5, color: t.textPrimary),
+                cursorColor: t.accent,
                 decoration: InputDecoration(
                   isDense: true,
                   hintText: 'Filter notes…',
-                  hintStyle: const TextStyle(
-                    color: NotelyColors.textFaint,
-                    fontSize: 12.5,
-                  ),
+                  hintStyle: TextStyle(color: t.textFaint, fontSize: 12.5),
                   filled: true,
-                  fillColor: NotelyColors.window,
+                  fillColor: t.background,
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 10,
                     vertical: 9,
                   ),
-                  prefixIcon: const Icon(
-                    Icons.search,
-                    size: 14,
-                    color: NotelyColors.textFaint,
-                  ),
+                  prefixIcon: Icon(Icons.search, size: 14, color: t.textFaint),
                   prefixIconConstraints: const BoxConstraints(minWidth: 30),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(NotelyDims.radius),
-                    borderSide: const BorderSide(color: NotelyColors.border),
+                    borderSide: BorderSide(color: t.border),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(NotelyDims.radius),
-                    borderSide: const BorderSide(color: NotelyColors.accent),
+                    borderSide: BorderSide(color: t.accent, width: 1.5),
                   ),
                 ),
               ),
             ),
-          const Divider(height: 1, color: NotelyColors.border),
+          Divider(height: 1, color: t.border),
           const Expanded(child: FileTree()),
         ],
       ),
     );
   }
 
-  Widget _iconBtn(IconData icon, String tip, VoidCallback onTap) {
+  Widget _iconBtn(
+    NotelyTokens t,
+    IconData icon,
+    String tip,
+    VoidCallback onTap,
+  ) {
+    return _SidebarIcon(icon: icon, tip: tip, onTap: onTap);
+  }
+}
+
+class _SidebarIcon extends StatefulWidget {
+  const _SidebarIcon({
+    required this.icon,
+    required this.tip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tip;
+  final VoidCallback onTap;
+
+  @override
+  State<_SidebarIcon> createState() => _SidebarIconState();
+}
+
+class _SidebarIconState extends State<_SidebarIcon> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
     return Tooltip(
-      message: tip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(4),
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(icon, size: 15, color: NotelyColors.textFaint),
+      message: widget.tip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: NotelyMotion.fast,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: _hover ? t.hover : Colors.transparent,
+              borderRadius: BorderRadius.circular(NotelyDims.radiusSmall),
+            ),
+            child: Icon(
+              widget.icon,
+              size: 15,
+              color: _hover ? t.textSecondary : t.textFaint,
+            ),
+          ),
         ),
       ),
     );
@@ -369,36 +514,58 @@ class _StatusBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scope = AppScope.of(context);
+    final t = context.tokens;
     return Container(
       height: NotelyDims.statusBarHeight,
-      decoration: const BoxDecoration(
-        color: NotelyColors.window,
-        border: Border(top: BorderSide(color: NotelyColors.border)),
+      decoration: BoxDecoration(
+        color: t.background,
+        border: Border(top: BorderSide(color: t.border)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
           AnimatedBuilder(
             animation: scope.stash,
-            builder: (context, _) => _item(scope.stash.name ?? '—'),
+            builder: (context, _) => _item(t, scope.stash.name ?? '—'),
           ),
-          const SizedBox(width: 18),
+          const SizedBox(width: 14),
           AnimatedBuilder(
             animation: scope.editor,
-            builder: (context, _) =>
-                _item(scope.editor.isDirty ? 'Unsaved' : 'Saved'),
+            builder: (context, _) {
+              if (!scope.editor.hasOpenNote) return const SizedBox.shrink();
+              final dirty = scope.editor.isDirty;
+              return Row(
+                children: [
+                  Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: dirty ? t.warning : t.success,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  _item(t, dirty ? 'Unsaved' : 'Saved'),
+                ],
+              );
+            },
           ),
           const Spacer(),
-          _item('Markdown'),
-          const SizedBox(width: 18),
-          _item('UTF-8'),
-          const SizedBox(width: 18),
+          _item(t, 'Markdown'),
+          const SizedBox(width: 14),
+          _Dot(t),
+          const SizedBox(width: 14),
+          _item(t, 'UTF-8'),
+          const SizedBox(width: 14),
+          _Dot(t),
+          const SizedBox(width: 14),
           AnimatedBuilder(
             animation: scope.editor,
-            builder: (context, _) => _item(
+            builder: (context, _) => Text(
               scope.editor.hasOpenNote
                   ? 'Ln ${scope.editor.line}, Col ${scope.editor.col}'
                   : 'Ln —, Col —',
+              style: NotelyType.statusMono.copyWith(color: t.textFaint),
             ),
           ),
         ],
@@ -406,16 +573,14 @@ class _StatusBar extends StatelessWidget {
     );
   }
 
-  Widget _item(String text) => Text(
-    text,
-    style: const TextStyle(fontSize: 11, color: NotelyColors.textFaint),
-  );
+  Widget _item(NotelyTokens t, String text) =>
+      Text(text, style: TextStyle(fontSize: 11, color: t.textFaint));
 }
 
 class _VerticalDivider extends StatelessWidget {
-  const _VerticalDivider();
+  const _VerticalDivider(this.t);
+  final NotelyTokens t;
 
   @override
-  Widget build(BuildContext context) =>
-      Container(width: 1, color: NotelyColors.border);
+  Widget build(BuildContext context) => Container(width: 1, color: t.border);
 }

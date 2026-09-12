@@ -42,8 +42,10 @@ class FileSystemService {
             children: await _readDir(entity.path),
           ),
         );
-      } else if (entity is File && name.toLowerCase().endsWith('.md')) {
-        files.add(FsNode(path: entity.path, isDirectory: false));
+      } else if (entity is File) {
+        final node = FsNode(path: entity.path, isDirectory: false);
+        // Surface notes and embedded images; hide everything else.
+        if (node.isMarkdown || node.isImage) files.add(node);
       }
     }
 
@@ -165,6 +167,55 @@ class FileSystemService {
         'Reveal is not supported on this platform',
       );
     }
+  }
+
+  /// Open [path] with the platform's default application (e.g. an image in Preview). Unlike
+  /// [revealInFileManager], this opens the file itself rather than highlighting it.
+  Future<void> openExternally(String path) async {
+    if (Platform.isMacOS) {
+      await Process.run('open', [path]);
+    } else if (Platform.isWindows) {
+      await Process.run('cmd', ['/c', 'start', '', path]);
+    } else if (Platform.isLinux) {
+      await Process.run('xdg-open', [path]);
+    } else {
+      throw const FileSystemException('Open is not supported on this platform');
+    }
+  }
+
+  /// Default folder (relative to the stash root) that embedded images are copied into.
+  static const attachmentsDir = 'attachments';
+
+  /// Copy an image at [sourcePath] into `<stashRoot>/attachments/`, keeping the original name
+  /// (de-duplicated on collision). Returns the copied file's absolute path so callers can build
+  /// a relative Markdown link. The stash filesystem stays the source of truth — the image is a
+  /// real file living beside the notes that reference it.
+  Future<String> importImage(String stashRoot, String sourcePath) async {
+    final source = File(sourcePath);
+    if (!await source.exists()) {
+      throw FileSystemException('Image not found', sourcePath);
+    }
+    final dir = Directory(p.join(stashRoot, attachmentsDir));
+    if (!await dir.exists()) await dir.create(recursive: true);
+
+    final dest = await _uniquePath(dir.path, p.basename(sourcePath));
+    await source.copy(dest);
+    return dest;
+  }
+
+  /// A path inside [dirPath] for [fileName] that doesn't collide (adds " 1", " 2", … before
+  /// the extension as needed).
+  Future<String> _uniquePath(String dirPath, String fileName) async {
+    final base = p.basenameWithoutExtension(fileName);
+    final ext = p.extension(fileName);
+    var candidate = p.join(dirPath, fileName);
+    var i = 1;
+    while (await File(candidate).exists() ||
+        await Directory(candidate).exists()) {
+      candidate = p.join(dirPath, '$base $i$ext');
+      i++;
+    }
+    return candidate;
   }
 
   String _ensureMarkdown(String rawName) {

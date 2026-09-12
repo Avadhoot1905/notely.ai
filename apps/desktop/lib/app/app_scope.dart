@@ -10,6 +10,7 @@ import '../features/editor/editor_state.dart';
 import '../features/explorer/explorer_state.dart';
 import '../features/listening/listening_state.dart';
 import '../features/stash/stash_state.dart';
+import 'theme_controller.dart';
 
 class AppScope extends InheritedWidget {
   const AppScope({
@@ -18,6 +19,7 @@ class AppScope extends InheritedWidget {
     required this.explorer,
     required this.editor,
     required this.listening,
+    required this.theme,
     required super.child,
   });
 
@@ -25,6 +27,7 @@ class AppScope extends InheritedWidget {
   final ExplorerController explorer;
   final EditorController editor;
   final ListeningController listening;
+  final ThemeController theme;
 
   static AppScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppScope>();
@@ -37,5 +40,6 @@ class AppScope extends InheritedWidget {
       stash != oldWidget.stash ||
       explorer != oldWidget.explorer ||
       editor != oldWidget.editor ||
-      listening != oldWidget.listening;
+      listening != oldWidget.listening ||
+      theme != oldWidget.theme;
 }

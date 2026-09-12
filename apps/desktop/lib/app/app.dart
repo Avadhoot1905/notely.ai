@@ -15,6 +15,7 @@ import '../features/stash/stash_state.dart';
 import '../features/workspace/workspace_shell.dart';
 import 'app_scope.dart';
 import 'theme.dart';
+import 'theme_controller.dart';
 
 class NotelyApp extends StatefulWidget {
   const NotelyApp({super.key});
@@ -28,6 +29,7 @@ class _NotelyAppState extends State<NotelyApp> {
   late final ExplorerController _explorer = ExplorerController();
   late final EditorController _editor = EditorController();
   late final ListeningController _listening = ListeningController();
+  late final ThemeController _theme = ThemeController();
 
   String? _loadedRoot;
 
@@ -37,6 +39,7 @@ class _NotelyAppState extends State<NotelyApp> {
     // Keep the explorer's root in sync with the open stash, and restore the last stash.
     _stash.addListener(_syncExplorerRoot);
     _stash.restore();
+    _theme.restore();
   }
 
   void _syncExplorerRoot() {
@@ -56,21 +59,28 @@ class _NotelyAppState extends State<NotelyApp> {
     _explorer.dispose();
     _editor.dispose();
     _listening.dispose();
+    _theme.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Notely',
-      debugShowCheckedModeBanner: false,
-      theme: buildNotelyTheme(),
-      home: AppScope(
-        stash: _stash,
-        explorer: _explorer,
-        editor: _editor,
-        listening: _listening,
-        child: const _AppGate(),
+    return AnimatedBuilder(
+      animation: _theme,
+      builder: (context, _) => MaterialApp(
+        title: 'Notely',
+        debugShowCheckedModeBanner: false,
+        theme: buildNotelyTheme(Brightness.light),
+        darkTheme: buildNotelyTheme(Brightness.dark),
+        themeMode: _theme.mode,
+        home: AppScope(
+          stash: _stash,
+          explorer: _explorer,
+          editor: _editor,
+          listening: _listening,
+          theme: _theme,
+          child: const _AppGate(),
+        ),
       ),
     );
   }

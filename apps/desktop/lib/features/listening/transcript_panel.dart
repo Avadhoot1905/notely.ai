@@ -1,9 +1,9 @@
 // Right-hand transcript panel.
 //
 // Mounted for any non-idle session state (the workspace shell animates the slide-in). Shows:
-//   • a header whose indicator reflects Listening / Paused / Review,
+//   • a header with a "LIVE TRANSCRIPT" identity label and a state indicator,
 //   • a compact audio-capability strip (honest about mic vs system audio),
-//   • the scrollable conversational transcript,
+//   • the scrollable conversation timeline,
 //   • a Review footer (Summarise / Close) once capture has stopped.
 
 import 'package:flutter/material.dart';
@@ -45,10 +45,11 @@ class _TranscriptPanelState extends State<TranscriptPanel> {
   @override
   Widget build(BuildContext context) {
     final listening = AppScope.of(context).listening;
+    final t = context.tokens;
     return Container(
-      decoration: const BoxDecoration(
-        color: NotelyColors.panel,
-        border: Border(left: BorderSide(color: NotelyColors.border)),
+      decoration: BoxDecoration(
+        color: t.panel,
+        border: Border(left: BorderSide(color: t.border)),
       ),
       child: AnimatedBuilder(
         animation: listening,
@@ -56,9 +57,9 @@ class _TranscriptPanelState extends State<TranscriptPanel> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _header(listening.state),
+              _header(t, listening.state),
               _CapabilityStrip(caps: listening.audioCapabilities),
-              Expanded(child: _transcript(listening.entries)),
+              Expanded(child: _transcript(t, listening.entries)),
               if (listening.isReviewing) const _ReviewFooter(),
             ],
           );
@@ -67,52 +68,68 @@ class _TranscriptPanelState extends State<TranscriptPanel> {
     );
   }
 
-  Widget _transcript(List entries) {
+  Widget _transcript(NotelyTokens t, List entries) {
     if (entries.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'Waiting for speech…',
-          style: TextStyle(fontSize: 12.5, color: NotelyColors.textFaint),
+          style: TextStyle(fontSize: 12.5, color: t.textFaint),
         ),
       );
     }
     _autoScroll();
     return ListView.builder(
       controller: _scroll,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      padding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
       itemCount: entries.length,
       itemBuilder: (context, i) =>
           TranscriptMessage(key: ValueKey(i), entry: entries[i]),
     );
   }
 
-  Widget _header(ListeningState state) {
+  Widget _header(NotelyTokens t, ListeningState state) {
     final (Color color, String label, bool pulse) = switch (state) {
-      ListeningState.listening => (NotelyColors.recording, 'Listening', true),
-      ListeningState.paused => (const Color(0xFFC9A15B), 'Paused', false),
-      ListeningState.reviewing => (NotelyColors.textSecondary, 'Review', false),
-      ListeningState.idle => (NotelyColors.textFaint, '', false),
+      ListeningState.listening => (t.recording, 'Listening', true),
+      ListeningState.paused => (t.warning, 'Paused', false),
+      ListeningState.reviewing => (t.textSecondary, 'Review', false),
+      ListeningState.idle => (t.textFaint, '', false),
+    };
+    final icon = switch (state) {
+      ListeningState.paused => Icons.pause_rounded,
+      ListeningState.reviewing => Icons.check_rounded,
+      _ => null,
     };
     return Container(
       height: NotelyDims.titleBarHeight,
       padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: NotelyColors.border)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.border)),
       ),
       child: Row(
         children: [
-          const Text(
-            'Live transcript',
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              color: NotelyColors.textPrimary,
-            ),
+          Text(
+            'LIVE TRANSCRIPT',
+            style: NotelyType.sectionLabel.copyWith(color: t.textSecondary),
           ),
           const Spacer(),
-          _StatusDot(color: color, pulse: pulse),
-          const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 11.5, color: color)),
+          if (icon != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 5),
+              child: Icon(icon, size: 13, color: color),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: _StatusDot(color: color, pulse: pulse),
+            ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
+          ),
         ],
       ),
     );
@@ -126,42 +143,48 @@ class _CapabilityStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: NotelyColors.border)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.border)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _row('Microphone', caps.microphone),
+          _row(t, 'Microphone', caps.microphone),
           const SizedBox(height: 4),
-          _row('System audio', caps.systemAudio, note: caps.systemAudioNote),
+          _row(t, 'System audio', caps.systemAudio, note: caps.systemAudioNote),
         ],
       ),
     );
   }
 
-  Widget _row(String label, AudioSourceStatus status, {String? note}) {
+  Widget _row(
+    NotelyTokens t,
+    String label,
+    AudioSourceStatus status, {
+    String? note,
+  }) {
     final (IconData icon, Color color, String text) = switch (status) {
       AudioSourceStatus.available => (
         Icons.check_circle_outline,
-        Color(0xFF8FC98C),
+        t.success,
         'Available',
       ),
       AudioSourceStatus.permissionRequired => (
         Icons.error_outline,
-        Color(0xFFC9A15B),
+        t.warning,
         'Permission required',
       ),
       AudioSourceStatus.unsupported => (
         Icons.block,
-        NotelyColors.textFaint,
+        t.textFaint,
         'Unsupported',
       ),
       AudioSourceStatus.unavailable => (
         Icons.remove_circle_outline,
-        NotelyColors.textFaint,
+        t.textFaint,
         'Unavailable',
       ),
     };
@@ -175,10 +198,7 @@ class _CapabilityStrip extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(
-                fontSize: 11,
-                color: NotelyColors.textSecondary,
-              ),
+              style: TextStyle(fontSize: 11, color: t.textSecondary),
             ),
           ),
           Icon(icon, size: 12, color: color),
@@ -211,18 +231,19 @@ class _ReviewFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final listening = AppScope.of(context).listening;
+    final t = context.tokens;
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
-        color: NotelyColors.panel,
-        border: Border(top: BorderSide(color: NotelyColors.border)),
+      decoration: BoxDecoration(
+        color: t.panel,
+        border: Border(top: BorderSide(color: t.border)),
       ),
       child: Row(
         children: [
           Expanded(
             child: _FooterBtn(
               label: listening.isSummarising ? 'Summarising…' : 'Summarise',
-              icon: Icons.auto_awesome,
+              icon: Icons.auto_awesome_outlined,
               primary: true,
               onTap: listening.isSummarising ? null : () => _summarise(context),
             ),
@@ -230,7 +251,7 @@ class _ReviewFooter extends StatelessWidget {
           const SizedBox(width: 8),
           _FooterBtn(
             label: 'Close',
-            icon: Icons.close,
+            icon: Icons.close_rounded,
             primary: false,
             onTap: listening.isSummarising ? null : listening.close,
           ),
@@ -240,7 +261,7 @@ class _ReviewFooter extends StatelessWidget {
   }
 }
 
-class _FooterBtn extends StatelessWidget {
+class _FooterBtn extends StatefulWidget {
   const _FooterBtn({
     required this.label,
     required this.icon,
@@ -254,20 +275,32 @@ class _FooterBtn extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
+  State<_FooterBtn> createState() => _FooterBtnState();
+}
+
+class _FooterBtnState extends State<_FooterBtn> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    final Color bg = primary ? NotelyColors.accent : NotelyColors.raised;
-    final Color fg = primary
-        ? const Color(0xFF0E1114)
-        : NotelyColors.textPrimary;
-    final Color border = primary ? Colors.transparent : NotelyColors.border;
+    final t = context.tokens;
+    final Color bg = widget.primary
+        ? (_hover ? Color.lerp(t.accent, Colors.white, 0.08)! : t.accent)
+        : (_hover ? t.raised : t.raised.withValues(alpha: 0.6));
+    final Color fg = widget.primary ? t.onAccent : t.textPrimary;
+    final Color border = widget.primary ? Colors.transparent : t.border;
     return Opacity(
-      opacity: onTap == null ? 0.6 : 1.0,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(NotelyDims.radius),
-          child: Container(
+      opacity: widget.onTap == null ? 0.6 : 1.0,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        cursor: widget.onTap == null
+            ? SystemMouseCursors.basic
+            : SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: NotelyMotion.fast,
             height: 32,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             alignment: Alignment.center,
@@ -279,15 +312,11 @@ class _FooterBtn extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, size: 14, color: fg),
+                Icon(widget.icon, size: 14, color: fg),
                 const SizedBox(width: 7),
                 Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: fg,
-                  ),
+                  widget.label,
+                  style: NotelyType.button.copyWith(color: fg),
                 ),
               ],
             ),
@@ -347,9 +376,21 @@ class _StatusDotState extends State<_StatusDot>
       decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
     );
     if (!widget.pulse) return dot;
+    // A soft glow ring communicates "live" without looking like an AI effect.
     return FadeTransition(
-      opacity: Tween(begin: 0.35, end: 1.0).animate(_c),
-      child: dot,
+      opacity: Tween(begin: 0.4, end: 1.0).animate(_c),
+      child: Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: widget.color.withValues(alpha: 0.5),
+              blurRadius: 5,
+            ),
+          ],
+        ),
+        child: dot,
+      ),
     );
   }
 }

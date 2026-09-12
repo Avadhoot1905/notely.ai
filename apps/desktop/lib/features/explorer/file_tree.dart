@@ -44,8 +44,13 @@ class _FileTreeState extends State<FileTree> {
 
   void _openFile(FsNode node) {
     _explorer.selectFile(node.path);
-    _editor.open(node.path);
     _focus.requestFocus();
+    // Images can't be edited as text — open them in the OS default viewer instead.
+    if (node.isImage) {
+      _explorer.openExternally(node.path);
+    } else {
+      _editor.open(node.path);
+    }
   }
 
   Future<void> _runAction(ExplorerAction action, FsNode? node) async {
@@ -106,46 +111,46 @@ class _FileTreeState extends State<FileTree> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: NotelyColors.editor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: const BorderSide(color: NotelyColors.borderStrong),
-        ),
-        title: Text(
-          'Delete "${node.name}"?',
-          style: const TextStyle(fontSize: 15, color: NotelyColors.textPrimary),
-        ),
-        content: Text(
-          [
-            if (nonEmptyFolder)
-              'This folder and everything inside it will be deleted.',
-            if (dirtyWarning) 'It has unsaved changes that will be lost.',
-            'This cannot be undone.',
-          ].join('\n'),
-          style: const TextStyle(
-            fontSize: 12.5,
-            height: 1.4,
-            color: NotelyColors.textSecondary,
+      builder: (context) {
+        final t = context.tokens;
+        return AlertDialog(
+          backgroundColor: t.editor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(NotelyDims.radiusLarge),
+            side: BorderSide(color: t.borderStrong),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: NotelyColors.textSecondary),
+          title: Text(
+            'Delete "${node.name}"?',
+            style: NotelyType.dialogTitle.copyWith(
+              fontSize: 15,
+              color: t.textPrimary,
             ),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: NotelyColors.recording),
+          content: Text(
+            [
+              if (nonEmptyFolder)
+                'This folder and everything inside it will be deleted.',
+              if (dirtyWarning) 'It has unsaved changes that will be lost.',
+              'This cannot be undone.',
+            ].join('\n'),
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: t.textSecondary,
             ),
           ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Delete', style: TextStyle(color: t.danger)),
+            ),
+          ],
+        );
+      },
     );
     if (confirmed != true) return;
     final ok = await _explorer.delete(node.path);
@@ -186,48 +191,45 @@ class _FileTreeState extends State<FileTree> {
     final name = p.basename(target);
     final choice = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: NotelyColors.editor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: const BorderSide(color: NotelyColors.borderStrong),
-        ),
-        title: const Text(
-          'Name already exists',
-          style: TextStyle(fontSize: 15, color: NotelyColors.textPrimary),
-        ),
-        content: Text(
-          'An item named "$name" already exists here.',
-          style: const TextStyle(
-            fontSize: 12.5,
-            height: 1.4,
-            color: NotelyColors.textSecondary,
+      builder: (context) {
+        final t = context.tokens;
+        return AlertDialog(
+          backgroundColor: t.editor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(NotelyDims.radiusLarge),
+            side: BorderSide(color: t.borderStrong),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop('cancel'),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: NotelyColors.textSecondary),
+          title: Text(
+            'Name already exists',
+            style: NotelyType.dialogTitle.copyWith(
+              fontSize: 15,
+              color: t.textPrimary,
             ),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop('rename'),
-            child: const Text(
-              'Rename',
-              style: TextStyle(color: NotelyColors.textPrimary),
+          content: Text(
+            'An item named "$name" already exists here.',
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: t.textSecondary,
             ),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop('replace'),
-            child: const Text(
-              'Replace',
-              style: TextStyle(color: NotelyColors.recording),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('cancel'),
+              child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
             ),
-          ),
-        ],
-      ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('rename'),
+              child: Text('Rename', style: TextStyle(color: t.textPrimary)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('replace'),
+              child: Text('Replace', style: TextStyle(color: t.danger)),
+            ),
+          ],
+        );
+      },
     );
     if (!mounted || choice == null || choice == 'cancel') return;
 
@@ -250,65 +252,71 @@ class _FileTreeState extends State<FileTree> {
     final controller = TextEditingController(text: initial);
     return showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: NotelyColors.editor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: const BorderSide(color: NotelyColors.borderStrong),
-        ),
-        title: const Text(
-          'New name',
-          style: TextStyle(fontSize: 15, color: NotelyColors.textPrimary),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
-          style: const TextStyle(
-            fontSize: 13.5,
-            color: NotelyColors.textPrimary,
+      builder: (context) {
+        final t = context.tokens;
+        return AlertDialog(
+          backgroundColor: t.editor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(NotelyDims.radiusLarge),
+            side: BorderSide(color: t.borderStrong),
           ),
-          cursorColor: NotelyColors.accent,
-          decoration: InputDecoration(
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(NotelyDims.radius),
-              borderSide: const BorderSide(color: NotelyColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(NotelyDims.radius),
-              borderSide: const BorderSide(color: NotelyColors.accent),
+          title: Text(
+            'New name',
+            style: NotelyType.dialogTitle.copyWith(
+              fontSize: 15,
+              color: t.textPrimary,
             ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: NotelyColors.textSecondary),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+            style: TextStyle(fontSize: 13.5, color: t.textPrimary),
+            cursorColor: t.accent,
+            decoration: InputDecoration(
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(NotelyDims.radius),
+                borderSide: BorderSide(color: t.border),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(NotelyDims.radius),
+                borderSide: BorderSide(color: t.accent),
+              ),
             ),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text(
-              'Move',
-              style: TextStyle(color: NotelyColors.accent),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
             ),
-          ),
-        ],
-      ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(context).pop(controller.text.trim()),
+              child: Text('Move', style: TextStyle(color: t.accent)),
+            ),
+          ],
+        );
+      },
     ).then((v) => (v == null || v.isEmpty) ? null : v);
   }
 
   void _snack(String message) {
     if (!mounted) return;
+    final t = context.tokens;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
-          content: Text(message, style: const TextStyle(fontSize: 12.5)),
-          backgroundColor: NotelyColors.raised,
+          content: Text(
+            message,
+            style: TextStyle(fontSize: 12.5, color: t.textPrimary),
+          ),
+          backgroundColor: t.raised,
           behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(NotelyDims.radius),
+            side: BorderSide(color: t.border),
+          ),
           width: 360,
           duration: const Duration(seconds: 3),
         ),
@@ -365,6 +373,7 @@ class _FileTreeState extends State<FileTree> {
   }
 
   Widget _buildTree(ExplorerController explorer, AppScope scope) {
+    final t = context.tokens;
     final rows = _buildRows(explorer, scope);
     final rootPath = explorer.rootPath;
 
@@ -375,11 +384,7 @@ class _FileTreeState extends State<FileTree> {
               explorer.query.trim().isEmpty
                   ? 'This stash is empty.\nRight-click to create a note or folder.'
                   : 'No notes match your search.',
-              style: const TextStyle(
-                fontSize: 12,
-                height: 1.5,
-                color: NotelyColors.textFaint,
-              ),
+              style: TextStyle(fontSize: 12, height: 1.5, color: t.textFaint),
             ),
           )
         : ListView(
@@ -398,10 +403,12 @@ class _FileTreeState extends State<FileTree> {
         onAcceptWithDetails: (d) => _handleDrop(d.data, rootPath!),
         builder: (context, candidate, rejected) {
           final highlight = candidate.isNotEmpty && !_overFolder;
-          return Container(
+          return AnimatedContainer(
+            duration: NotelyMotion.fast,
             decoration: BoxDecoration(
+              color: highlight ? t.selection : Colors.transparent,
               border: Border.all(
-                color: highlight ? NotelyColors.accent : Colors.transparent,
+                color: highlight ? t.accent : Colors.transparent,
                 width: 1,
               ),
             ),
@@ -534,6 +541,7 @@ class _FileTreeState extends State<FileTree> {
       name: node.name,
       depth: depth,
       isFolder: false,
+      isImage: node.isImage,
       isSelected: explorer.selectedPath == node.path,
       onTap: () => _openFile(node),
       onSecondaryTapDown: (pos) =>
@@ -571,30 +579,35 @@ class _FileTreeState extends State<FileTree> {
   }
 
   Widget _dragFeedback(FsNode node, bool isFolder) {
+    final t = context.tokens;
     return Material(
       color: Colors.transparent,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: NotelyColors.raised,
+          color: t.raised,
           borderRadius: BorderRadius.circular(NotelyDims.radius),
-          border: Border.all(color: NotelyColors.accent),
+          border: Border.all(color: t.accent),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.22),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              isFolder ? Icons.folder : Icons.description_outlined,
+              isFolder ? Icons.folder_rounded : Icons.article_outlined,
               size: 13,
-              color: NotelyColors.textSecondary,
+              color: t.textSecondary,
             ),
             const SizedBox(width: 7),
             Text(
               node.name,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: NotelyColors.textPrimary,
-              ),
+              style: NotelyType.row.copyWith(color: t.textPrimary),
             ),
           ],
         ),

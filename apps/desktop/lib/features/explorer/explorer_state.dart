@@ -341,6 +341,34 @@ class ExplorerController extends ChangeNotifier {
     }
   }
 
+  /// Open [path] with the OS default app (used for image files).
+  Future<void> openExternally(String path) async {
+    try {
+      await _fs.openExternally(path);
+    } on Exception catch (e) {
+      _error = 'Could not open file: $e';
+      notifyListeners();
+    }
+  }
+
+  /// Copy an image into the stash's attachments folder and refresh the tree. Returns the
+  /// imported file's absolute path (for building a Markdown link), or null on failure.
+  Future<String?> importImage(String sourcePath) async {
+    final root = _rootPath;
+    if (root == null) return null;
+    try {
+      final dest = await _fs.importImage(root, sourcePath);
+      await refresh();
+      _error = null;
+      notifyListeners();
+      return dest;
+    } on FileSystemException catch (e) {
+      _error = e.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
   /// Remap [path] when its prefix [from] becomes [to] (handles the path itself too).
   String _remap(String path, String from, String to) {
     if (p.equals(path, from)) return to;

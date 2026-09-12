@@ -11,6 +11,7 @@ import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 
 import '../../services/filesystem/file_system_service.dart';
+import 'markdown_highlighter.dart';
 
 class EditorController extends ChangeNotifier {
   EditorController({FileSystemService? fs})
@@ -19,7 +20,9 @@ class EditorController extends ChangeNotifier {
   }
 
   final FileSystemService _fs;
-  final TextEditingController text = TextEditingController();
+
+  /// Syntax-highlighting controller — the document remains plain editable Markdown.
+  final TextEditingController text = MarkdownHighlightingController();
 
   static const Duration _autosaveDebounce = Duration(milliseconds: 800);
 
@@ -77,6 +80,22 @@ class EditorController extends ChangeNotifier {
     await saveNow();
     _recomputeCaret();
     notifyListeners();
+  }
+
+  /// Insert [snippet] at the caret (replacing any selection) and leave the caret after it.
+  /// Treated as a normal edit, so it marks the note dirty and autosaves.
+  void insertText(String snippet) {
+    if (_openPath == null) return;
+    final value = text.value;
+    final sel = value.selection;
+    final base = value.text;
+    final start = sel.isValid ? sel.start : base.length;
+    final end = sel.isValid ? sel.end : base.length;
+    final newText = base.replaceRange(start, end, snippet);
+    text.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: start + snippet.length),
+    );
   }
 
   /// Flush the current buffer to disk now.

@@ -1,7 +1,8 @@
-// A single conversational transcript block: timestamp + speaker + bubble.
+// A single conversational transcript block: speaker + timestamp + message.
 //
-// Styled like a calm chat message (Granola / WhatsApp), not a raw terminal line. Fades/slides
-// in when it arrives.
+// Reads as a calm conversation timeline (Granola-like), not a chat app: a thin speaker-colored
+// spine on the left, a strong speaker label, a muted timestamp, and restrained message body.
+// Fades/slides in as it arrives.
 
 import 'package:flutter/material.dart';
 
@@ -21,20 +22,8 @@ class _TranscriptMessageState extends State<TranscriptMessage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 260),
+    duration: NotelyMotion.emphasized,
   )..forward();
-
-  // Derive a stable accent per speaker so names are easy to track.
-  static const _speakerColors = [
-    Color(0xFF5B9BD5),
-    Color(0xFF8FC98C),
-    Color(0xFFC9A15B),
-    Color(0xFFB58FD5),
-  ];
-
-  Color get _speakerColor =>
-      _speakerColors[widget.entry.speaker.hashCode.abs() %
-          _speakerColors.length];
 
   @override
   void dispose() {
@@ -44,62 +33,65 @@ class _TranscriptMessageState extends State<TranscriptMessage>
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
+    final speaker = t.speakerFor(widget.entry.speaker);
     return FadeTransition(
       opacity: _c,
       child: SlideTransition(
         position: Tween(
-          begin: const Offset(0, 0.08),
+          begin: const Offset(0, 0.06),
           end: Offset.zero,
-        ).animate(CurvedAnimation(parent: _c, curve: Curves.easeOut)),
+        ).animate(CurvedAnimation(parent: _c, curve: NotelyMotion.curve)),
         child: Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Text(
-                    widget.entry.speaker,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: _speakerColor,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    widget.entry.time,
-                    style: const TextStyle(
-                      fontSize: 10.5,
-                      color: NotelyColors.textFaint,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
+              // Speaker spine.
               Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 11,
-                  vertical: 9,
-                ),
+                width: 2,
+                margin: const EdgeInsets.only(top: 2, bottom: 2),
                 decoration: BoxDecoration(
-                  color: NotelyColors.raised,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(3),
-                    topRight: Radius.circular(NotelyDims.radius),
-                    bottomLeft: Radius.circular(NotelyDims.radius),
-                    bottomRight: Radius.circular(NotelyDims.radius),
-                  ),
-                  border: Border.all(color: NotelyColors.border),
+                  color: speaker.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(1),
                 ),
-                child: Text(
-                  widget.entry.text,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    height: 1.42,
-                    color: NotelyColors.textPrimary,
-                  ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          widget.entry.speaker,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: speaker,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.entry.time,
+                          style: NotelyType.statusMono.copyWith(
+                            fontSize: 10.5,
+                            color: t.textFaint,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      widget.entry.text,
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.5,
+                        color: t.textPrimary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

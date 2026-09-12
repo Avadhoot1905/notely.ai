@@ -1,12 +1,12 @@
 // The primary listening controls in the sidebar.
 //
 // Renders from [ListeningController.state]:
-//   idle      → [● Start listening]
+//   idle      → [● Start listening]   (accent — a primary action with a subtle hover lift)
 //   listening → [■ Stop listening]  [Ⅱ Pause]
-//   paused    → [▶ Resume]          [■ Stop]
+//   paused    → [▶ Resume]          [■ Stop]   (warning-tinted paused affordance)
 //   reviewing → a muted "Reviewing" hint (actions live in the transcript panel footer)
 //
-// Visual language matches the original single accent control — compact rows, same radius/size.
+// State is communicated by icon + label + color together (never color alone).
 
 import 'package:flutter/material.dart';
 
@@ -21,6 +21,7 @@ class ListeningButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = AppScope.of(context);
     final listening = scope.listening;
+    final t = context.tokens;
     return AnimatedBuilder(
       animation: listening,
       builder: (context, _) {
@@ -40,7 +41,7 @@ class ListeningButton extends StatelessWidget {
                 Expanded(
                   child: _Btn(
                     label: 'Stop listening',
-                    icon: Icons.stop,
+                    icon: Icons.stop_rounded,
                     style: _BtnStyle.danger,
                     onTap: listening.stop,
                   ),
@@ -48,7 +49,7 @@ class ListeningButton extends StatelessWidget {
                 const SizedBox(width: 8),
                 _Btn(
                   label: 'Pause',
-                  icon: Icons.pause,
+                  icon: Icons.pause_rounded,
                   style: _BtnStyle.neutral,
                   onTap: listening.pause,
                 ),
@@ -60,7 +61,7 @@ class ListeningButton extends StatelessWidget {
                 Expanded(
                   child: _Btn(
                     label: 'Resume',
-                    icon: Icons.play_arrow,
+                    icon: Icons.play_arrow_rounded,
                     style: _BtnStyle.accent,
                     onTap: listening.resume,
                   ),
@@ -68,7 +69,7 @@ class ListeningButton extends StatelessWidget {
                 const SizedBox(width: 8),
                 _Btn(
                   label: 'Stop',
-                  icon: Icons.stop,
+                  icon: Icons.stop_rounded,
                   style: _BtnStyle.danger,
                   onTap: listening.stop,
                 ),
@@ -80,11 +81,11 @@ class ListeningButton extends StatelessWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(NotelyDims.radius),
-                border: Border.all(color: NotelyColors.border),
+                border: Border.all(color: t.border),
               ),
-              child: const Text(
+              child: Text(
                 'Reviewing — summarise or close →',
-                style: TextStyle(fontSize: 11.5, color: NotelyColors.textFaint),
+                style: NotelyType.meta.copyWith(color: t.textFaint),
               ),
             );
         }
@@ -95,7 +96,7 @@ class ListeningButton extends StatelessWidget {
 
 enum _BtnStyle { accent, danger, neutral }
 
-class _Btn extends StatelessWidget {
+class _Btn extends StatefulWidget {
   const _Btn({
     required this.label,
     required this.icon,
@@ -111,31 +112,52 @@ class _Btn extends StatelessWidget {
   final double iconSize;
 
   @override
+  State<_Btn> createState() => _BtnState();
+}
+
+class _BtnState extends State<_Btn> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     late final Color bg;
     late final Color fg;
     late final Color border;
-    switch (style) {
+    List<BoxShadow>? shadow;
+
+    switch (widget.style) {
       case _BtnStyle.accent:
-        bg = NotelyColors.accent;
-        fg = const Color(0xFF0E1114);
+        bg = _hover ? Color.lerp(t.accent, Colors.white, 0.08)! : t.accent;
+        fg = t.onAccent;
         border = Colors.transparent;
+        if (_hover) {
+          shadow = [
+            BoxShadow(
+              color: t.accent.withValues(alpha: 0.35),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ];
+        }
       case _BtnStyle.danger:
-        bg = NotelyColors.recording.withValues(alpha: 0.14);
-        fg = NotelyColors.recording;
-        border = NotelyColors.recording.withValues(alpha: 0.5);
+        bg = t.recording.withValues(alpha: _hover ? 0.2 : 0.14);
+        fg = t.recording;
+        border = t.recording.withValues(alpha: 0.5);
       case _BtnStyle.neutral:
-        bg = NotelyColors.raised;
-        fg = NotelyColors.textPrimary;
-        border = NotelyColors.border;
+        bg = _hover ? t.raised : t.raised.withValues(alpha: 0.6);
+        fg = t.textPrimary;
+        border = t.border;
     }
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(NotelyDims.radius),
-        child: Container(
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: NotelyMotion.fast,
           height: 34,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           alignment: Alignment.center,
@@ -143,22 +165,19 @@ class _Btn extends StatelessWidget {
             color: bg,
             borderRadius: BorderRadius.circular(NotelyDims.radius),
             border: Border.all(color: border),
+            boxShadow: shadow,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: iconSize, color: fg),
+              Icon(widget.icon, size: widget.iconSize, color: fg),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  label,
+                  widget.label,
                   overflow: TextOverflow.ellipsis,
                   softWrap: false,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: fg,
-                  ),
+                  style: NotelyType.button.copyWith(color: fg),
                 ),
               ),
             ],
