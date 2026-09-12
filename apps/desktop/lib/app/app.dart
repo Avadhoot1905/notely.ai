@@ -7,6 +7,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../features/ask/ask_state.dart';
 import '../features/editor/editor_state.dart';
 import '../features/explorer/explorer_state.dart';
 import '../features/listening/listening_state.dart';
@@ -30,16 +31,18 @@ class _NotelyAppState extends State<NotelyApp> {
   late final EditorController _editor = EditorController();
   late final ListeningController _listening = ListeningController();
   late final ThemeController _theme = ThemeController();
+  late final AskController _ask = AskController();
 
   String? _loadedRoot;
 
   @override
   void initState() {
     super.initState();
-    // Keep the explorer's root in sync with the open stash, and restore the last stash.
+    // Keep the explorer + Ask in sync with the open stash, and restore persisted state.
     _stash.addListener(_syncExplorerRoot);
     _stash.restore();
     _theme.restore();
+    _ask.restore();
   }
 
   void _syncExplorerRoot() {
@@ -47,8 +50,10 @@ class _NotelyAppState extends State<NotelyApp> {
     if (path != null && path != _loadedRoot) {
       _loadedRoot = path;
       _explorer.setRoot(path);
+      _ask.setStash(path);
     } else if (path == null) {
       _loadedRoot = null;
+      _ask.setStash(null);
     }
   }
 
@@ -60,6 +65,7 @@ class _NotelyAppState extends State<NotelyApp> {
     _editor.dispose();
     _listening.dispose();
     _theme.dispose();
+    _ask.dispose();
     super.dispose();
   }
 
@@ -79,6 +85,7 @@ class _NotelyAppState extends State<NotelyApp> {
           editor: _editor,
           listening: _listening,
           theme: _theme,
+          ask: _ask,
           child: const _AppGate(),
         ),
       ),

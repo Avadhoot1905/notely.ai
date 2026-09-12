@@ -24,6 +24,10 @@ class EditorController extends ChangeNotifier {
   /// Syntax-highlighting controller — the document remains plain editable Markdown.
   final TextEditingController text = MarkdownHighlightingController();
 
+  /// Focus for the editor field, so external actions (e.g. Ask citations) can reveal a
+  /// selected passage by focusing the field.
+  final FocusNode focusNode = FocusNode(debugLabel: 'editor');
+
   static const Duration _autosaveDebounce = Duration(milliseconds: 800);
 
   String? _openPath;
@@ -86,6 +90,34 @@ class EditorController extends ChangeNotifier {
     _dirty = true; // force the programmatic write (listener was suppressed)
     await saveNow();
     _recomputeCaret();
+    notifyListeners();
+  }
+
+  /// Select the (0-based, inclusive) line range [startLine]..[endLine] and focus the editor so
+  /// the passage scrolls into view and highlights — used when opening an Ask citation.
+  void selectLines(int startLine, int endLine) {
+    if (_openPath == null) return;
+    final content = text.text;
+    final lines = content.split('\n');
+    var pos = 0;
+    var selStart = 0;
+    var selEnd = content.length;
+    for (var i = 0; i < lines.length; i++) {
+      final lineStart = pos;
+      final lineEnd = pos + lines[i].length;
+      if (i == startLine) selStart = lineStart;
+      if (i == endLine) {
+        selEnd = lineEnd;
+        break;
+      }
+      pos = lineEnd + 1; // + newline
+    }
+    final s = selStart.clamp(0, content.length);
+    final e = selEnd.clamp(s, content.length);
+    text.selection = TextSelection(baseOffset: s, extentOffset: e);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (focusNode.canRequestFocus) focusNode.requestFocus();
+    });
     notifyListeners();
   }
 
@@ -192,6 +224,7 @@ class EditorController extends ChangeNotifier {
     _saveTimer?.cancel();
     text.removeListener(_onChanged);
     text.dispose();
+    focusNode.dispose();
     super.dispose();
   }
 }

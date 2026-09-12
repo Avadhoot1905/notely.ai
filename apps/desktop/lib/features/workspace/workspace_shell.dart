@@ -12,6 +12,8 @@ import 'package:path/path.dart' as p;
 
 import '../../app/app_scope.dart';
 import '../../app/theme.dart';
+import '../ask/ask_button.dart';
+import '../ask/ask_panel.dart';
 import '../editor/editor_state.dart';
 import '../editor/markdown_editor.dart';
 import '../explorer/explorer_state.dart';
@@ -44,17 +46,27 @@ class WorkspaceShell extends StatelessWidget {
                     _VerticalDivider(t),
                     Expanded(
                       child: AnimatedBuilder(
-                        animation: scope.listening,
+                        animation: Listenable.merge([
+                          scope.listening,
+                          scope.ask,
+                        ]),
                         builder: (context, _) {
+                          // Ask takes the right dock; otherwise the live transcript uses it.
+                          final askOpen = scope.ask.isOpen;
                           final showTranscript = scope.listening.showTranscript;
+                          final showRight = askOpen || showTranscript;
                           return LayoutBuilder(
                             builder: (context, constraints) {
-                              // Shrink the transcript toward its minimum on narrow windows so
+                              // Shrink the right panel toward its minimum on narrow windows so
                               // the editor stays usable.
                               final available = constraints.maxWidth;
-                              final panelW = available < 760
-                                  ? NotelyDims.transcriptMinWidth
-                                  : NotelyDims.transcriptWidth;
+                              final panelW = askOpen
+                                  ? (available < 820
+                                        ? NotelyDims.askMinWidth
+                                        : NotelyDims.askWidth)
+                                  : (available < 760
+                                        ? NotelyDims.transcriptMinWidth
+                                        : NotelyDims.transcriptWidth);
                               return Row(
                                 children: [
                                   const Expanded(child: MarkdownEditor()),
@@ -63,11 +75,13 @@ class WorkspaceShell extends StatelessWidget {
                                       alignment: Alignment.centerLeft,
                                       duration: NotelyDims.panelAnim,
                                       curve: NotelyMotion.curve,
-                                      widthFactor: showTranscript ? 1.0 : 0.0,
+                                      widthFactor: showRight ? 1.0 : 0.0,
                                       child: SizedBox(
                                         width: panelW,
-                                        child: showTranscript
-                                            ? const TranscriptPanel()
+                                        child: showRight
+                                            ? (askOpen
+                                                  ? const AskPanel()
+                                                  : const TranscriptPanel())
                                             : null,
                                       ),
                                     ),
@@ -287,6 +301,8 @@ class _TitleBar extends StatelessWidget {
               },
             ),
           ),
+          const AskButton(),
+          const SizedBox(width: 8),
           const _ThemeToggle(),
           const SizedBox(width: 2),
           _ChromeIcon(icon: Icons.more_horiz, tip: 'Menu', onTap: () {}),

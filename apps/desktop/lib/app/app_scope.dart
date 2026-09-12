@@ -6,6 +6,7 @@
 
 import 'package:flutter/widgets.dart';
 
+import '../features/ask/ask_state.dart';
 import '../features/editor/editor_state.dart';
 import '../features/explorer/explorer_state.dart';
 import '../features/listening/listening_state.dart';
@@ -20,6 +21,7 @@ class AppScope extends InheritedWidget {
     required this.editor,
     required this.listening,
     required this.theme,
+    required this.ask,
     required super.child,
   });
 
@@ -28,6 +30,7 @@ class AppScope extends InheritedWidget {
   final EditorController editor;
   final ListeningController listening;
   final ThemeController theme;
+  final AskController ask;
 
   static AppScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppScope>();
@@ -41,5 +44,6 @@ class AppScope extends InheritedWidget {
       explorer != oldWidget.explorer ||
       editor != oldWidget.editor ||
       listening != oldWidget.listening ||
-      theme != oldWidget.theme;
+      theme != oldWidget.theme ||
+      ask != oldWidget.ask;
 }

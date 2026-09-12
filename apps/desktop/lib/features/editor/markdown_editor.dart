@@ -95,6 +95,7 @@ class MarkdownEditor extends StatelessWidget {
                       },
                       child: TextField(
                         controller: scope.editor.text,
+                        focusNode: scope.editor.focusNode,
                         maxLines: null,
                         expands: true,
                         textAlignVertical: TextAlignVertical.top,

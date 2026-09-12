@@ -237,6 +237,8 @@ abstract final class NotelyDims {
   static const double sidebarWidth = 260;
   static const double transcriptWidth = 340;
   static const double transcriptMinWidth = 280;
+  static const double askWidth = 400;
+  static const double askMinWidth = 320;
   static const double titleBarHeight = 40;
   static const double statusBarHeight = 24;
   static const double rowHeight = 26;
