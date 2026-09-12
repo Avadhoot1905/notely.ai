@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
+import 'package:path/path.dart' as p;
 
 import '../../services/filesystem/file_system_service.dart';
 
@@ -128,6 +129,36 @@ class EditorController extends ChangeNotifier {
     if (_error == null) return;
     _error = null;
     notifyListeners();
+  }
+
+  /// React to the open file (or its containing folder) being moved/renamed on disk. Rebinds
+  /// the open path to its new location WITHOUT re-reading from disk, so in-memory (possibly
+  /// unsaved) content and dirty state are preserved and future saves target the new path.
+  void handlePathMoved(String oldPath, String newPath) {
+    final open = _openPath;
+    if (open == null) return;
+    if (p.equals(open, oldPath)) {
+      _openPath = newPath;
+      notifyListeners();
+    } else if (p.isWithin(oldPath, open)) {
+      // The open file lived inside a moved/renamed folder — remap the prefix.
+      final rel = p.relative(open, from: oldPath);
+      _openPath = p.join(newPath, rel);
+      notifyListeners();
+    }
+  }
+
+  /// React to the open file (or its containing folder) being deleted: close the editor.
+  void handlePathDeleted(String path) {
+    final open = _openPath;
+    if (open == null) return;
+    if (p.equals(open, path) || p.isWithin(path, open)) {
+      _saveTimer?.cancel();
+      _openPath = null;
+      _dirty = false;
+      _suppressSave(() => text.text = '');
+      notifyListeners();
+    }
   }
 
   @override

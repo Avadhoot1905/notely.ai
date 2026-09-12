@@ -15,7 +15,9 @@ class FileTreeItem extends StatefulWidget {
     required this.isFolder,
     this.isExpanded = false,
     this.isSelected = false,
+    this.isDropTarget = false,
     required this.onTap,
+    this.onSecondaryTapDown,
   });
 
   final String name;
@@ -23,7 +25,11 @@ class FileTreeItem extends StatefulWidget {
   final bool isFolder;
   final bool isExpanded;
   final bool isSelected;
+
+  /// Highlighted as a valid drag-and-drop destination.
+  final bool isDropTarget;
   final VoidCallback onTap;
+  final void Function(Offset globalPosition)? onSecondaryTapDown;
 
   @override
   State<FileTreeItem> createState() => _FileTreeItemState();
@@ -34,11 +40,13 @@ class _FileTreeItemState extends State<FileTreeItem> {
 
   @override
   Widget build(BuildContext context) {
-    final Color bg = widget.isSelected
+    final Color bg = widget.isDropTarget
+        ? NotelyColors.accentMuted
+        : widget.isSelected
         ? NotelyColors.selection
         : (_hover ? NotelyColors.hover : Colors.transparent);
 
-    final Color fg = widget.isSelected || _hover
+    final Color fg = widget.isSelected || _hover || widget.isDropTarget
         ? NotelyColors.textPrimary
         : NotelyColors.textSecondary;
 
@@ -48,6 +56,9 @@ class _FileTreeItemState extends State<FileTreeItem> {
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
+        onSecondaryTapDown: widget.onSecondaryTapDown == null
+            ? null
+            : (d) => widget.onSecondaryTapDown!(d.globalPosition),
         behavior: HitTestBehavior.opaque,
         child: Container(
           height: NotelyDims.rowHeight,

@@ -244,76 +244,12 @@ class _SidebarState extends State<_Sidebar> {
     });
   }
 
-  Future<void> _newFile() async {
-    final scope = AppScope.of(context);
-    final name = await _promptName('New note', hint: 'Meeting Notes.md');
-    if (name == null) return;
-    final path = await scope.explorer.createFile(name);
-    if (path != null) await scope.editor.open(path);
-  }
+  // Toolbar create uses the same inline input as the context menu, targeting the currently
+  // selected folder (or the stash root). The editor opens the new file via the inline flow.
+  void _newFile() => AppScope.of(context).explorer.beginCreate(isFolder: false);
 
-  Future<void> _newFolder() async {
-    final scope = AppScope.of(context);
-    final name = await _promptName('New folder', hint: 'Projects');
-    if (name == null) return;
-    await scope.explorer.createFolder(name);
-  }
-
-  Future<String?> _promptName(String title, {required String hint}) {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: NotelyColors.editor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: const BorderSide(color: NotelyColors.borderStrong),
-        ),
-        title: Text(
-          title,
-          style: const TextStyle(fontSize: 15, color: NotelyColors.textPrimary),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
-          style: const TextStyle(
-            fontSize: 13.5,
-            color: NotelyColors.textPrimary,
-          ),
-          cursorColor: NotelyColors.accent,
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: NotelyColors.textFaint),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(NotelyDims.radius),
-              borderSide: const BorderSide(color: NotelyColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(NotelyDims.radius),
-              borderSide: const BorderSide(color: NotelyColors.accent),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: NotelyColors.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text(
-              'Create',
-              style: TextStyle(color: NotelyColors.accent),
-            ),
-          ),
-        ],
-      ),
-    ).then((v) => (v == null || v.isEmpty) ? null : v);
-  }
+  void _newFolder() =>
+      AppScope.of(context).explorer.beginCreate(isFolder: true);
 
   @override
   Widget build(BuildContext context) {

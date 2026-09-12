@@ -7,9 +7,31 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import '../../services/filesystem/file_system_service.dart';
 import '../../services/filesystem/fs_node.dart';
+
+/// Outcome of a drag/drop (or programmatic) move.
+enum MoveStatus { moved, noop, invalid, collision, error }
+
+class MoveResult {
+  const MoveResult(
+    this.status, {
+    this.oldPath,
+    this.newPath,
+    this.conflictTarget,
+    this.message,
+  });
+
+  final MoveStatus status;
+  final String? oldPath;
+  final String? newPath;
+  final String? conflictTarget;
+  final String? message;
+
+  static const noop = MoveResult(MoveStatus.noop);
+}
 
 class ExplorerController extends ChangeNotifier {
   ExplorerController({FileSystemService? fs})
@@ -25,12 +47,24 @@ class ExplorerController extends ChangeNotifier {
   String _query = '';
   String? _error;
 
+  // Inline create/rename state (one at a time).
+  String? _creatingInDir;
+  bool _creatingIsFolder = false;
+  String? _renamingPath;
+
   String? get rootPath => _rootPath;
   List<FsNode> get roots => _roots;
   String? get selectedPath => _selectedPath;
   String get query => _query;
   bool get isFiltering => _query.trim().isNotEmpty;
   String? get error => _error;
+
+  /// Directory an inline "new item" input is currently shown in (null if none).
+  String? get creatingInDir => _creatingInDir;
+  bool get creatingIsFolder => _creatingIsFolder;
+
+  /// Path currently being renamed inline (null if none).
+  String? get renamingPath => _renamingPath;
 
   /// The directory new files/folders land in: the explicitly chosen folder, else the root.
   String? get targetDir => _targetDir ?? _rootPath;
@@ -141,5 +175,175 @@ class ExplorerController extends ChangeNotifier {
       if (parent.path == dir.path) break;
       dir = parent;
     }
+  }
+
+  // ── Inline create ─────────────────────────────────────────────────────────
+
+  /// Show an inline "new file/folder" input inside [dir] (defaults to [targetDir]/root).
+  void beginCreate({required bool isFolder, String? dir}) {
+    final parent = dir ?? targetDir;
+    if (parent == null) return;
+    _creatingInDir = parent;
+    _creatingIsFolder = isFolder;
+    _renamingPath = null;
+    if (parent != _rootPath) _expanded.add(parent);
+    notifyListeners();
+  }
+
+  void cancelCreate() {
+    if (_creatingInDir == null) return;
+    _creatingInDir = null;
+    notifyListeners();
+  }
+
+  /// Confirm the inline create with [name]. Returns the new path (file) / null.
+  Future<String?> confirmCreate(String name) async {
+    final dir = _creatingInDir;
+    final isFolder = _creatingIsFolder;
+    _creatingInDir = null;
+    if (dir == null || name.trim().isEmpty) {
+      notifyListeners();
+      return null;
+    }
+    return isFolder
+        ? createFolder(name, dirPath: dir)
+        : createFile(name, dirPath: dir);
+  }
+
+  // ── Inline rename ─────────────────────────────────────────────────────────
+
+  void beginRename(String path) {
+    _renamingPath = path;
+    _creatingInDir = null;
+    notifyListeners();
+  }
+
+  void cancelRename() {
+    if (_renamingPath == null) return;
+    _renamingPath = null;
+    notifyListeners();
+  }
+
+  /// Confirm an inline rename. Returns (oldPath, newPath) on success, else null.
+  Future<(String, String)?> confirmRename(String newName) async {
+    final path = _renamingPath;
+    _renamingPath = null;
+    if (path == null || newName.trim().isEmpty) {
+      notifyListeners();
+      return null;
+    }
+    try {
+      final newPath = await _fs.rename(path, newName);
+      await refresh();
+      _expandAncestors(newPath);
+      if (_selectedPath != null &&
+          (p.equals(_selectedPath!, path) ||
+              p.isWithin(path, _selectedPath!))) {
+        _selectedPath = _remap(_selectedPath!, path, newPath);
+      }
+      _error = null;
+      notifyListeners();
+      return (path, newPath);
+    } on FileSystemException catch (e) {
+      _error = e.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  // ── Move / delete / reveal ──────────────────────────────────────────────
+
+  /// Whether dropping [source] into [destDir] is structurally valid (no disk access). Used for
+  /// live drop-target highlighting.
+  bool canDrop(String source, String destDir) {
+    if (p.equals(p.dirname(source), destDir)) return false; // same directory
+    if (p.equals(source, destDir)) return false; // onto itself
+    if (p.isWithin(source, destDir)) return false; // into own descendant
+    return true;
+  }
+
+  /// Move [source] into [destDir]. Validates structure, detects collisions (returns
+  /// [MoveStatus.collision] so the UI can prompt), updates selection, and expands the target.
+  Future<MoveResult> move(
+    String source, {
+    required String destDir,
+    bool replace = false,
+    String? renameTo,
+  }) async {
+    if (renameTo == null) {
+      // Dropping into the current parent is a no-op.
+      if (p.equals(p.dirname(source), destDir)) return MoveResult.noop;
+      // Onto itself or into its own descendant is not allowed.
+      if (p.equals(source, destDir) || p.isWithin(source, destDir)) {
+        return const MoveResult(
+          MoveStatus.invalid,
+          message: 'Can’t move a folder into itself or its own subfolder.',
+        );
+      }
+    }
+    final name = renameTo ?? p.basename(source);
+    final target = p.join(destDir, name);
+    if (!replace && !p.equals(target, source) && await _fs.exists(target)) {
+      return MoveResult(MoveStatus.collision, conflictTarget: target);
+    }
+    try {
+      final newPath = await _fs.move(
+        source,
+        destDir,
+        replace: replace,
+        renameTo: renameTo,
+      );
+      await refresh();
+      _expandAncestors(newPath);
+      if (_selectedPath != null &&
+          (p.equals(_selectedPath!, source) ||
+              p.isWithin(source, _selectedPath!))) {
+        _selectedPath = _remap(_selectedPath!, source, newPath);
+      }
+      _targetDir = destDir;
+      _error = null;
+      notifyListeners();
+      return MoveResult(MoveStatus.moved, oldPath: source, newPath: newPath);
+    } on FileSystemException catch (e) {
+      _error = e.message;
+      notifyListeners();
+      return MoveResult(MoveStatus.error, message: e.message);
+    }
+  }
+
+  /// Delete [path] (folders recursively). Returns true on success.
+  Future<bool> delete(String path) async {
+    try {
+      await _fs.delete(path);
+      await refresh();
+      if (_selectedPath != null &&
+          (p.equals(_selectedPath!, path) ||
+              p.isWithin(path, _selectedPath!))) {
+        _selectedPath = null;
+      }
+      _expanded.removeWhere((e) => p.equals(e, path) || p.isWithin(path, e));
+      _error = null;
+      notifyListeners();
+      return true;
+    } on FileSystemException catch (e) {
+      _error = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> reveal(String path) async {
+    try {
+      await _fs.revealInFileManager(path);
+    } on Exception catch (e) {
+      _error = 'Could not reveal in file manager: $e';
+      notifyListeners();
+    }
+  }
+
+  /// Remap [path] when its prefix [from] becomes [to] (handles the path itself too).
+  String _remap(String path, String from, String to) {
+    if (p.equals(path, from)) return to;
+    return p.join(to, p.relative(path, from: from));
   }
 }
