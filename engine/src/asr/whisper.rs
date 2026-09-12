@@ -1,18 +1,28 @@
-//! Whisper-based [`super::AsrProvider`] implementation (the v0 default).
+//! Whisper-based [`AsrProvider`] — the intended v0 default.
 //!
-//! TODO(v0): integrate whisper.cpp (or equivalent), load the model described by a manifest
-//! in `models/manifests/whisper.yaml`, and map its output to [`crate::domain::Transcript`].
+//! This is a real boundary with NO real implementation yet: `transcribe` returns
+//! [`AsrError::NotImplemented`] rather than pretending. Integrating whisper.cpp (loading the model
+//! from `models/manifests/whisper.yaml` and mapping its segments to [`Transcript`]) is future work.
+//! Until then, audio→transcript is unavailable; the transcript-import path (see the pipeline) is
+//! the supported flow, and tests use the fixture provider.
+
+use async_trait::async_trait;
 
 use crate::domain::Transcript;
 
-use super::AsrProvider;
+use super::provider::{AsrError, AsrProvider, AudioInput};
 
-/// Local Whisper transcriber. Model/runtime handles will be added when implemented.
+/// Placeholder for the local Whisper transcriber.
 #[derive(Default)]
 pub struct WhisperProvider;
 
+#[async_trait]
 impl AsrProvider for WhisperProvider {
-    fn transcribe(&self, _audio_path: &str) -> anyhow::Result<Transcript> {
-        anyhow::bail!("WhisperProvider::transcribe not implemented")
+    fn name(&self) -> &'static str {
+        "whisper"
+    }
+
+    async fn transcribe(&self, _audio: &AudioInput) -> Result<Transcript, AsrError> {
+        Err(AsrError::NotImplemented("whisper"))
     }
 }

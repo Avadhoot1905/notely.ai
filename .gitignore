@@ -17,14 +17,47 @@ apps/desktop/web/
 **/Pods/
 
 # === Models (weights are NEVER committed — only manifests under models/manifests/) ===
+# Everything under models/ is ignored EXCEPT the README and the manifests.
 models/**
 !models/README.md
 !models/manifests/
 !models/manifests/**
 
-# === Local, user-generated data / fixtures binaries ===
+# === Model weight / inference artifact formats (never versioned here) ===
+# Explicit formats rather than broad patterns, so real source is never accidentally hidden.
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.npz
+# Local runtime stores / inference caches (Ollama, HF, llama.cpp, etc.).
+.ollama/
+**/ollama/models/
+.cache/huggingface/
+**/*.llamafile
+
+# === Local Notely runtime + generated data (lives outside the repo, but guard anyway) ===
+# Databases and app data.
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+/data/runtime/
+# Generated embeddings / temporary inference files.
+*.embeddings
+*.embeddings.json
+*.tmp.wav
+*.partial
+
+# === Generated media / transcripts (keep curated fixtures; ignore generated blobs) ===
 data/fixtures/audio/*
 !data/fixtures/audio/.gitkeep
+# Ad-hoc generated audio/transcripts anywhere outside the curated fixture dirs.
+/data/generated/
 
 # === Editors / OS ===
 .DS_Store
@@ -35,3 +68,4 @@ data/fixtures/audio/*
 # === Env / secrets ===
 .env
 .env.*
+!.env.example

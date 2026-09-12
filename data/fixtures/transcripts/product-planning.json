@@ -1,0 +1,14 @@
+{
+  "segments": [
+    { "speaker_id": "S1", "start": 0.0, "end": 8.5, "text": "Alright, let's get started. Today we need to lock the v0 scope for Notely and decide what ships first.", "language": "en" },
+    { "speaker_id": "S2", "start": 8.5, "end": 19.0, "text": "I think the transcript-to-MOM path is the core. If we can turn a transcript into a structured summary reliably, that's the whole bet.", "language": "en" },
+    { "speaker_id": "S1", "start": 19.0, "end": 27.0, "text": "Agreed. So decision one: v0 ships the transcript import path, and audio recording comes later.", "language": "en" },
+    { "speaker_id": "S3", "start": 27.0, "end": 38.0, "text": "One concern from my side: if Ollama isn't running, the whole pipeline fails. We should at least surface a clear error instead of hanging.", "language": "en" },
+    { "speaker_id": "S1", "start": 38.0, "end": 46.0, "text": "Good point, that's a real risk. Let's make the engine health-check the model runtime on startup.", "language": "en" },
+    { "speaker_id": "S2", "start": 46.0, "end": 58.0, "text": "Action item for me then: I'll wire the health check and a friendly error by Friday.", "language": "en" },
+    { "speaker_id": "S3", "start": 58.0, "end": 70.0, "text": "And I'll own the SQLite storage layer so meetings and generated MOMs persist locally. I can have a first cut next week.", "language": "en" },
+    { "speaker_id": "S1", "start": 70.0, "end": 80.0, "text": "One open question: which Qwen size do we default to? 4B feels right for a dev laptop but we should benchmark 1.7B too.", "language": "en" },
+    { "speaker_id": "S2", "start": 80.0, "end": 88.0, "text": "Let's default to qwen3 4B for now and revisit after we have real meeting transcripts to test against.", "language": "en" },
+    { "speaker_id": "S1", "start": 88.0, "end": 95.0, "text": "Great. So to summarize: transcript path first, health checks, SQLite storage, Qwen 4B default. Thanks everyone." }
+  ]
+}

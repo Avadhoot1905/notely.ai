@@ -12,50 +12,68 @@ Flutter ◀──event────  IPC  ◀── Engine
 - Dart side: `apps/desktop/lib/ipc/` (`protocol.dart`, `engine_client.dart`).
 - Canonical contract: [`packages/protocol`](../packages/protocol/README.md).
 
+## Status (v0)
+
+- **Implemented:** the Rust server (`engine/src/ipc/server.rs`), the full request/response/event
+  types, versioning, job creation + cancellation, and dispatch into the pipeline.
+- **Scaffolded:** the Dart client (`apps/desktop/lib/ipc`) mirrors an older draft of the message
+  set and will be re-synced to the types below.
+- **Transport (v0):** newline-delimited JSON over a loopback **TCP** socket (default
+  `127.0.0.1:8765`). Each line is one JSON message. It is *not* an HTTP/web server — just framing.
+  The transport is isolated in `server.rs`, so it can change without touching pipeline logic.
+
 ## Transport
 
-The transport (local socket, stdio pipe to the engine process, …) is chosen per platform and
-kept behind `ipc::server::Server` / `EngineClient`. **The pipeline and UI never depend on how
-bytes move** — so we can change transports later without rewriting either side.
+Isolated behind `ipc::server::Server`. **The pipeline and UI never depend on how bytes move.** On
+the wire: client→engine lines are `RequestEnvelope`s; engine→client lines are either a
+`ResponseEnvelope` (carries `request_id`) or an `EventEnvelope` (carries `event`).
 
 ## Message types
 
-**Requests (Flutter → Engine)** — deliberately minimal for v0:
+Defined in `engine/src/ipc/protocol.rs` and `events.rs`.
 
-`StartMeeting` · `ImportMeeting` · `GetMeeting` · `GetTranscript` · `GetMom` · `CancelJob`
+**Requests (Flutter → Engine):**
 
-**Responses (immediate):** `JobAccepted { job_id }` · `Data { json }` · `Error { message }`
+`Health` · `ProcessMeeting { input }` · `GetJob { job_id }` · `CancelJob { job_id }` ·
+`GetMeeting { meeting_id }` · `GetTranscript { meeting_id }` · `GetMom { meeting_id }`
+
+`ProcessInput` is either `Transcript { title?, transcript }` (the supported v0 path) or
+`Audio { title?, path }` (needs media + ASR — not wired end-to-end yet).
+
+**Responses (immediate):** `Health(info)` · `JobAccepted { job_id }` · `Job(job)` ·
+`Meeting(meeting)` · `Transcript(transcript)` · `Mom { markdown }` · `Error { message }`
 
 **Events (Engine → Flutter, async):**
 
 ```text
-JOB_CREATED
-TRANSCRIPTION_STARTED
-TRANSCRIPTION_PROGRESS
-ANALYSIS_STARTED
-MOM_GENERATED
-JOB_COMPLETED
-JOB_FAILED
+JobCreated
+ProcessingStarted
+TranscriptionStarted
+AnalysisStarted
+RenderingStarted
+JobCompleted
+JobFailed
 ```
 
 ## Lifecycle
 
 ```text
 Flutter                         Engine
-  │  StartMeeting/ImportMeeting     │
+  │  ProcessMeeting{input}          │
   │────────────────────────────────▶│  create job
   │        JobAccepted{job_id}       │
   │◀────────────────────────────────│
-  │           JOB_CREATED            │
-  │◀───── events (by job_id) ────────│  TRANSCRIPTION_STARTED
-  │        TRANSCRIPTION_PROGRESS     │  ... pipeline runs ...
-  │           ANALYSIS_STARTED       │
-  │           MOM_GENERATED          │
-  │           JOB_COMPLETED          │
+  │           JobCreated             │
+  │◀───── events (by job_id) ────────│  ProcessingStarted
+  │        (Transcription/           │  ... pipeline runs ...
+  │         AnalysisStarted/         │
+  │         RenderingStarted)        │
+  │           JobCompleted           │
 ```
 
 A request returns quickly (often just a `job_id`); real progress arrives as a stream of events
-correlated by `job_id`. `CancelJob` signals cancellation to the running job.
+correlated by `job_id`. `CancelJob` signals cancellation, which the orchestrator checks between
+stages.
 
 ## IDs and versioning
 

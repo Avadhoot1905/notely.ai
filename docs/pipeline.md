@@ -49,3 +49,15 @@ requirement. See [ai-engine.md](ai-engine.md).
 | MOM rendering (templates)                           | verification (language judgement) |
 
 Use the LLM only where language understanding is actually required.
+
+## Status (v0)
+
+- **Implemented:** the orchestrator (`pipeline/orchestrator.rs`) drives create-meeting →
+  (transcript) → AI analyze → render → store, emitting events and honoring cancellation between
+  stages; the in-memory job registry (`pipeline/jobs.rs`); the AI, storage (SQLite), and Markdown
+  renderer stages. The **transcript → Meeting IR → Markdown → storage** path is proven end-to-end
+  against Ollama/Qwen (`engine/tests/ollama_smoke.rs`).
+- **Scaffolded / not wired end-to-end:** the **audio → media → ASR** path. `media` (FFmpeg) is
+  implemented and `asr` has a real trait + fixture provider, but the Whisper backend returns
+  "not implemented", so audio input currently ends in a clean error, not a transcript.
+- **Planned:** VAD-based chunking, diarization, and the optional verified-mode reasoning pass.

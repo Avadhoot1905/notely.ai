@@ -4,9 +4,14 @@ use serde::{Deserialize, Serialize};
 
 use super::Evidence;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Decision {
-    pub summary: String,
-    /// Where in the transcript this decision was made — for traceability in the UI.
-    pub evidence: Option<Evidence>,
+    /// The decision itself, stated plainly.
+    pub decision: String,
+    /// Why it was made / surrounding context, if captured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    /// Supporting quotes/timestamps from the transcript.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<Evidence>,
 }

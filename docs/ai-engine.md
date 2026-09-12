@@ -58,3 +58,17 @@ Described by manifests in [`models/`](../models/README.md). **Weights are never 
 
 The LLM outputs the **Meeting IR** (structured data), and a deterministic renderer produces the
 MOM. This is the core design choice — see [meeting-ir.md](meeting-ir.md).
+
+## Status (v0)
+
+- **Implemented:** `AiAnalyzer` → `LlmAiEngine` runs a single **schema-constrained** LLM call
+  (`ai/extraction.rs` builds the IR JSON Schema and passes it as Ollama's `format`), then
+  deterministic **synthesis** (`ai/synthesis.rs`, e.g. backfilling participants) and
+  **validation** (`ai/validation.rs`). Malformed model output is rejected with a useful error —
+  never silently accepted. `LlmProvider` → `OllamaProvider` performs the HTTP generation. This is
+  exercised end-to-end against `qwen3:4b` in `engine/tests/ollama_smoke.rs`.
+- **Scaffolded / planned:** a distinct verified-mode critique pass, multi-call extraction for very
+  long meetings, and additional runtimes behind `LlmProvider` (llama.cpp, etc.).
+
+The extraction schema is owned by Rust (`ai/extraction.rs::ir_json_schema`) and mirrors the domain
+`MeetingIr` — the model fills it in, it does not define it.

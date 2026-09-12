@@ -4,13 +4,30 @@ use serde::{Deserialize, Serialize};
 
 use super::Evidence;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Lifecycle state of an action item. Defaults to [`ActionStatus::Open`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionStatus {
+    #[default]
+    Open,
+    InProgress,
+    Done,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ActionItem {
-    pub task: String,
-    /// Speaker id or resolved name of the owner, if identified.
+    /// What needs to be done.
+    pub description: String,
+    /// Who owns it — speaker id or resolved name, if identified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
-    /// Free-form deadline as spoken (e.g. "Friday") — normalization is a later concern.
+    /// Deadline as spoken (e.g. "Friday"); normalization to a date is later work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline: Option<String>,
+    #[serde(default)]
+    pub status: ActionStatus,
     /// Where in the transcript this task was assigned.
-    pub evidence: Option<Evidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<Evidence>,
 }

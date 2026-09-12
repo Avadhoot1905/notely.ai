@@ -170,16 +170,29 @@ Equivalent `make <target>` / `just <target>` recipes exist. Full guide:
 ### Models
 
 Weights are **never** committed. Manifests live in `models/manifests/`; fetch models into your
-runtime/cache with `./scripts/download-models.sh` (e.g. `ollama pull qwen3`). See
+runtime/cache with `./scripts/download-models.sh` (`ollama pull qwen3:4b`). See
 [models/README.md](models/README.md).
 
 ## Current status
 
-- ✅ Monorepo scaffolded: Flutter app + single Rust engine + shared protocol
-- ✅ Clean module boundaries (domain / ipc / pipeline / media / asr / ai / llm / storage / renderer)
-- ✅ Versioned IPC contract defined on both sides
-- ✅ `cargo fmt/clippy/test` and `flutter analyze/test` green
-- ⏳ Pipeline stages are scaffolded with clear TODOs, not yet implemented
+**Implemented (backend):**
+- ✅ Single Rust engine, internally modular, runnable (`cargo run -p notely-engine`) with graceful shutdown
+- ✅ Domain model + structured **Meeting IR** (serde)
+- ✅ AI layer: schema-constrained extraction → deterministic synthesis → validation
+- ✅ LLM runtime abstraction with an **Ollama** provider (default model `qwen3:4b`)
+- ✅ SQLite storage (embedded, no server) behind repository traits
+- ✅ Deterministic Markdown/JSON renderers (no LLM used to format)
+- ✅ Pipeline orchestrator with jobs, cancellation, and progress events
+- ✅ Versioned IPC server over a transport-isolated TCP JSON socket
+- ✅ **End-to-end proven:** transcript → Ollama/Qwen → Meeting IR → Markdown (`--ignored` smoke test)
+- ✅ `cargo fmt/clippy/test` green (unit + integration tests)
+
+**Scaffolded (clean boundary, not wired):**
+- ⏳ ASR (Whisper) — trait + fixture provider exist; real transcription returns "not implemented"
+- ⏳ Media (FFmpeg) audio extraction is implemented but the audio→transcript path isn't end-to-end
+- ⏳ Flutter UI and the Dart IPC client (this task was backend-only)
+
+See per-area status in [docs/](docs/) (`pipeline.md`, `ai-engine.md`, `ipc.md`).
 
 ## Roadmap
 

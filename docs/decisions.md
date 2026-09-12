@@ -3,6 +3,29 @@
 A lightweight log of the major v0 architectural decisions. Newest first. Keep entries short:
 what we decided, and why.
 
+## D-0011 — IPC transport: newline-delimited JSON over loopback TCP
+The v0 transport is line-framed JSON on `127.0.0.1:8765`, isolated in `engine/src/ipc/server.rs`.
+Simple, cross-platform, trivially testable, and swappable later. Not an HTTP/web server — just
+framing — honoring the "no web server for IPC" constraint.
+
+## D-0010 — Engine is a library + thin binary
+`engine` exposes a `notely_engine` lib (all modules) plus a small `main.rs`. This makes modules
+unit- and integration-testable (`engine/tests/`) without splitting into multiple crates.
+
+## D-0009 — SQLite (rusqlite, bundled) is the v0 store
+Embedded, file-based, no server. Bundled build ⇒ no system SQLite dependency. Blocking calls run
+on Tokio's blocking pool. Artifacts (transcript/IR/MOM) are stored by `(meeting_id, kind)` so new
+artifact kinds need no schema change. See [storage.md](storage.md).
+
+## D-0008 — Development model: `qwen3:4b` via Ollama
+Default LLM is Qwen3 4B (Q4_K_M, ~2.5 GB) — fits a dev laptop while producing usable Meeting IR.
+Model-agnostic: override with `NOTELY_OLLAMA_MODEL`. See `models/manifests/qwen3.yaml`.
+
+## D-0007 — Structured output via schema-constrained generation
+The AI layer sends the IR JSON Schema as Ollama's `format` and deserializes/validates the result;
+malformed output errors out. The Rust side owns the schema — the model fills it in. See
+[ai-engine.md](ai-engine.md).
+
 ## D-0006 — Local-first storage, backend hidden behind repositories
 Data stays on the user's machine; storage lives in `engine/src/storage` behind repository traits.
 Start simple (likely SQLite + files), don't over-design. Flutter never sees DB internals.

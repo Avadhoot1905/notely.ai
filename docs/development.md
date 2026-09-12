@@ -4,8 +4,26 @@
 
 - **Rust** (stable; `rustup`) — see `rust-toolchain.toml`. Includes `rustfmt` + `clippy`.
 - **Flutter** (stable, Dart ≥ 3.12) with desktop enabled for your OS.
-- Optional runtimes for real processing: **Ollama** (local LLM), **FFmpeg**, a Whisper backend.
-- Optional: **just** (`justfile`) — otherwise use `make` or the scripts directly.
+- **Ollama** — required for AI processing (the `qwen3:4b` model). Install from
+  <https://ollama.com>, then `ollama pull qwen3:4b`.
+- Optional: **FFmpeg** (audio extraction; the audio→transcript path is not wired end-to-end yet),
+  **just** (`justfile`) — otherwise use `make` or the scripts directly.
+
+## Configuration
+
+The engine reads these environment variables (all optional; see `.env.example` and
+`engine/src/config.rs`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NOTELY_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
+| `NOTELY_OLLAMA_MODEL` | `qwen3:4b` | model tag to run |
+| `NOTELY_OLLAMA_TIMEOUT_SECS` | `120` | per-generation timeout |
+| `NOTELY_DATA_DIR` | OS app-data dir | SQLite DB + artifacts location (outside the repo) |
+| `NOTELY_LOG_LEVEL` | `info` | `tracing` filter |
+| `NOTELY_IPC_ADDR` | `127.0.0.1:8765` | IPC server bind address |
+
+Copy `.env.example` to `.env` (git-ignored) to set these locally.
 
 ## First-time setup
 
@@ -53,8 +71,20 @@ flutter test integration_test    # integration tests
 Model weights are **not** in the repo. Manifests live in `models/manifests/`.
 
 ```bash
-./scripts/download-models.sh   # pull models into runtime/cache (e.g. `ollama pull qwen3`)
-./scripts/verify-models.sh     # check required models are present
+./scripts/download-models.sh   # ollama pull qwen3:4b
+./scripts/verify-models.sh     # check required models/runtime are present
+```
+
+## End-to-end backend smoke test
+
+Prove the core path (transcript → Ollama/Qwen → structured Meeting IR → Markdown) with a real
+model. Requires Ollama running with `qwen3:4b`:
+
+```bash
+# ignored by default so the normal suite never depends on Ollama:
+cargo test -p notely-engine --test ollama_smoke -- --ignored --nocapture
+# or an interactive runner that prints the IR + MOM:
+cargo run -p notely-engine --example transcript_to_mom
 ```
 
 ## Repo conventions
