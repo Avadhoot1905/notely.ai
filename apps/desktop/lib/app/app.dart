@@ -8,8 +8,11 @@
 import 'package:flutter/material.dart';
 
 import '../features/ask/ask_state.dart';
+import '../features/calls/call_detection_state.dart';
+import '../features/calls/call_notes_prompt.dart';
 import '../features/editor/editor_state.dart';
 import '../features/explorer/explorer_state.dart';
+import '../features/listening/listening_overlay.dart';
 import '../features/listening/listening_state.dart';
 import '../features/stash/stash_picker.dart';
 import '../features/stash/stash_state.dart';
@@ -32,6 +35,7 @@ class _NotelyAppState extends State<NotelyApp> {
   late final ListeningController _listening = ListeningController();
   late final ThemeController _theme = ThemeController();
   late final AskController _ask = AskController();
+  late final CallDetectionController _callDetection = CallDetectionController();
 
   String? _loadedRoot;
 
@@ -51,9 +55,12 @@ class _NotelyAppState extends State<NotelyApp> {
       _loadedRoot = path;
       _explorer.setRoot(path);
       _ask.setStash(path);
+      // Once a stash is open, watch for calls so we can offer to take notes.
+      _callDetection.start();
     } else if (path == null) {
       _loadedRoot = null;
       _ask.setStash(null);
+      _callDetection.stop();
     }
   }
 
@@ -66,6 +73,7 @@ class _NotelyAppState extends State<NotelyApp> {
     _listening.dispose();
     _theme.dispose();
     _ask.dispose();
+    _callDetection.dispose();
     super.dispose();
   }
 
@@ -86,6 +94,7 @@ class _NotelyAppState extends State<NotelyApp> {
           listening: _listening,
           theme: _theme,
           ask: _ask,
+          callDetection: _callDetection,
           child: const _AppGate(),
         ),
       ),
@@ -115,6 +124,10 @@ class _AppGate extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             if (stash.isOpen) const WorkspaceShell() else ColoredBox(color: bg),
+            // Call-notes prompt + the floating "listening" widget live above the workspace but
+            // below the picker, so switching stashes always draws over them.
+            if (stash.isOpen) const ListeningOverlay(),
+            if (stash.isOpen) const CallNotesPrompt(),
             if (stash.showPicker) const StashPicker(),
           ],
         );

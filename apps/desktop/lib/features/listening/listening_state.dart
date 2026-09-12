@@ -52,11 +52,30 @@ class ListeningController extends ChangeNotifier {
   MeetingSession? _session;
   bool _summarising = false;
 
+  // Elapsed-capture accounting: accumulated time from finished listening spans, plus the span
+  // in progress since [_runningSince]. Pausing folds the current span in; resuming reopens one.
+  Duration _accumulated = Duration.zero;
+  DateTime? _runningSince;
+
   ListeningState get state => _state;
   bool get isIdle => _state == ListeningState.idle;
   bool get isListening => _state == ListeningState.listening;
   bool get isPaused => _state == ListeningState.paused;
   bool get isReviewing => _state == ListeningState.reviewing;
+
+  /// Total time capture has been active this session (paused time excluded).
+  Duration get elapsed {
+    final running = _runningSince == null
+        ? Duration.zero
+        : DateTime.now().difference(_runningSince!);
+    return _accumulated + running;
+  }
+
+  void _foldRunningSpan() {
+    if (_runningSince == null) return;
+    _accumulated += DateTime.now().difference(_runningSince!);
+    _runningSince = null;
+  }
 
   /// The transcript panel is shown for any non-idle state.
   bool get showTranscript => _state != ListeningState.idle;
@@ -71,6 +90,8 @@ class ListeningController extends ChangeNotifier {
   Future<void> start({String? activeFilePath}) async {
     if (_state != ListeningState.idle) return;
     _session = MeetingSession(activeFilePath: activeFilePath);
+    _accumulated = Duration.zero;
+    _runningSince = DateTime.now();
     _state = ListeningState.listening;
     notifyListeners();
 
@@ -96,6 +117,7 @@ class ListeningController extends ChangeNotifier {
 
   Future<void> pause() async {
     if (_state != ListeningState.listening) return;
+    _foldRunningSpan();
     _state = ListeningState.paused;
     notifyListeners();
     await _audio.pause();
@@ -104,6 +126,7 @@ class ListeningController extends ChangeNotifier {
 
   Future<void> resume() async {
     if (_state != ListeningState.paused) return;
+    _runningSince = DateTime.now();
     _state = ListeningState.listening;
     notifyListeners();
     await _audio.resume();
@@ -115,6 +138,7 @@ class ListeningController extends ChangeNotifier {
     if (_state == ListeningState.idle || _state == ListeningState.reviewing) {
       return;
     }
+    _foldRunningSpan();
     _state = ListeningState.reviewing;
     notifyListeners();
     _transcript.stop();
@@ -155,6 +179,8 @@ class ListeningController extends ChangeNotifier {
   void _endSession() {
     _state = ListeningState.idle;
     _session = null;
+    _accumulated = Duration.zero;
+    _runningSince = null;
     notifyListeners();
   }
 
