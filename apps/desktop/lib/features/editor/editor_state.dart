@@ -38,6 +38,13 @@ class EditorController extends ChangeNotifier {
   bool get isLoading => _loading;
   String? get error => _error;
 
+  /// The note's first line — its H1 title, which drives the filename.
+  String get firstLine {
+    final content = text.text;
+    final nl = content.indexOf('\n');
+    return nl == -1 ? content : content.substring(0, nl);
+  }
+
   /// Current 1-based caret line/column, for the status bar.
   int _line = 1;
   int _col = 1;

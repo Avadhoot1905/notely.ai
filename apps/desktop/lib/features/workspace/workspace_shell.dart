@@ -5,6 +5,8 @@
 // shrink the transcript toward its minimum and keep the editor usable. All color comes from
 // `context.tokens` so the whole shell re-themes in light/dark with no hard-coded values.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
@@ -16,6 +18,7 @@ import '../explorer/explorer_state.dart';
 import '../explorer/file_tree.dart';
 import '../listening/listening_button.dart';
 import '../listening/transcript_panel.dart';
+import '../stash/stash_switcher.dart';
 
 class WorkspaceShell extends StatelessWidget {
   const WorkspaceShell({super.key});
@@ -25,61 +28,63 @@ class WorkspaceShell extends StatelessWidget {
     final scope = AppScope.of(context);
     final t = context.tokens;
     return _ErrorListener(
-      child: Scaffold(
-        backgroundColor: t.background,
-        body: Column(
-          children: [
-            const _TitleBar(),
-            Expanded(
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: NotelyDims.sidebarWidth,
-                    child: _Sidebar(),
-                  ),
-                  _VerticalDivider(t),
-                  Expanded(
-                    child: AnimatedBuilder(
-                      animation: scope.listening,
-                      builder: (context, _) {
-                        final showTranscript = scope.listening.showTranscript;
-                        return LayoutBuilder(
-                          builder: (context, constraints) {
-                            // Shrink the transcript toward its minimum on narrow windows so
-                            // the editor stays usable.
-                            final available = constraints.maxWidth;
-                            final panelW = available < 760
-                                ? NotelyDims.transcriptMinWidth
-                                : NotelyDims.transcriptWidth;
-                            return Row(
-                              children: [
-                                const Expanded(child: MarkdownEditor()),
-                                ClipRect(
-                                  child: AnimatedAlign(
-                                    alignment: Alignment.centerLeft,
-                                    duration: NotelyDims.panelAnim,
-                                    curve: NotelyMotion.curve,
-                                    widthFactor: showTranscript ? 1.0 : 0.0,
-                                    child: SizedBox(
-                                      width: panelW,
-                                      child: showTranscript
-                                          ? const TranscriptPanel()
-                                          : null,
+      child: _TitleSync(
+        child: Scaffold(
+          backgroundColor: t.background,
+          body: Column(
+            children: [
+              const _TitleBar(),
+              Expanded(
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: NotelyDims.sidebarWidth,
+                      child: _Sidebar(),
+                    ),
+                    _VerticalDivider(t),
+                    Expanded(
+                      child: AnimatedBuilder(
+                        animation: scope.listening,
+                        builder: (context, _) {
+                          final showTranscript = scope.listening.showTranscript;
+                          return LayoutBuilder(
+                            builder: (context, constraints) {
+                              // Shrink the transcript toward its minimum on narrow windows so
+                              // the editor stays usable.
+                              final available = constraints.maxWidth;
+                              final panelW = available < 760
+                                  ? NotelyDims.transcriptMinWidth
+                                  : NotelyDims.transcriptWidth;
+                              return Row(
+                                children: [
+                                  const Expanded(child: MarkdownEditor()),
+                                  ClipRect(
+                                    child: AnimatedAlign(
+                                      alignment: Alignment.centerLeft,
+                                      duration: NotelyDims.panelAnim,
+                                      curve: NotelyMotion.curve,
+                                      widthFactor: showTranscript ? 1.0 : 0.0,
+                                      child: SizedBox(
+                                        width: panelW,
+                                        child: showTranscript
+                                            ? const TranscriptPanel()
+                                            : null,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            );
-                          },
-                        );
-                      },
+                                ],
+                              );
+                            },
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const _StatusBar(),
-          ],
+              const _StatusBar(),
+            ],
+          ),
         ),
       ),
     );
@@ -154,6 +159,69 @@ class _ErrorListenerState extends State<_ErrorListener> {
   void dispose() {
     _explorer?.removeListener(_check);
     _editor?.removeListener(_check);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Title sync — keep the open note's filename == its first line (H1 title).
+// ─────────────────────────────────────────────────────────────────────────────
+class _TitleSync extends StatefulWidget {
+  const _TitleSync({required this.child});
+  final Widget child;
+
+  @override
+  State<_TitleSync> createState() => _TitleSyncState();
+}
+
+class _TitleSyncState extends State<_TitleSync> {
+  static const _debounce = Duration(milliseconds: 600);
+  EditorController? _editor;
+  ExplorerController? _explorer;
+  Timer? _timer;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final scope = AppScope.of(context);
+    _explorer = scope.explorer;
+    if (_editor != scope.editor) {
+      _editor?.removeListener(_onEdit);
+      _editor = scope.editor..addListener(_onEdit);
+    }
+  }
+
+  void _onEdit() {
+    _timer?.cancel();
+    _timer = Timer(_debounce, _sync);
+  }
+
+  Future<void> _sync() async {
+    final editor = _editor;
+    final explorer = _explorer;
+    if (editor == null || explorer == null) return;
+    if (!editor.hasOpenNote || editor.isLoading) return;
+    // Only react to genuine user edits (open() leaves the note clean).
+    if (!editor.isDirty) return;
+
+    final title = ExplorerController.titleToFileName(editor.firstLine);
+    if (title == null) return;
+    final current = p.basenameWithoutExtension(editor.openPath!);
+    if (title == current) return;
+
+    // Flush to the current path first, then rename the file to match the title.
+    await editor.saveNow();
+    final res = await explorer.renameForTitle(editor.openPath!, title);
+    if (res != null && mounted) editor.handlePathMoved(res.$1, res.$2);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _editor?.removeListener(_onEdit);
     super.dispose();
   }
 
@@ -356,30 +424,16 @@ class _SidebarState extends State<_Sidebar> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Stash header — workspace identity.
+          // Explorer header + actions (the stash identity now lives in the bottom switcher).
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 14, 6, 8),
             child: Row(
               children: [
-                Container(
-                  width: 5,
-                  height: 5,
-                  margin: const EdgeInsets.only(right: 8),
-                  decoration: BoxDecoration(
-                    color: t.accent,
-                    borderRadius: BorderRadius.circular(1.5),
-                  ),
-                ),
                 Expanded(
-                  child: AnimatedBuilder(
-                    animation: scope.stash,
-                    builder: (context, _) => Text(
-                      (scope.stash.name ?? 'Stash').toUpperCase(),
-                      style: NotelyType.sectionLabel.copyWith(
-                        color: t.textSecondary,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  child: Text(
+                    'EXPLORER',
+                    style: NotelyType.sectionLabel.copyWith(color: t.textFaint),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 _iconBtn(
@@ -394,12 +448,6 @@ class _SidebarState extends State<_Sidebar> {
                   Icons.create_new_folder_outlined,
                   'New folder',
                   _newFolder,
-                ),
-                _iconBtn(
-                  t,
-                  Icons.swap_horiz,
-                  'Switch Stash',
-                  scope.stash.close,
                 ),
               ],
             ),
@@ -443,6 +491,8 @@ class _SidebarState extends State<_Sidebar> {
             ),
           Divider(height: 1, color: t.border),
           const Expanded(child: FileTree()),
+          Divider(height: 1, color: t.border),
+          const StashSwitcher(),
         ],
       ),
     );

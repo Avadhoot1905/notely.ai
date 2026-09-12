@@ -34,7 +34,9 @@ class MarkdownHighlightingController extends TextEditingController {
     final children = <InlineSpan>[];
 
     for (var i = 0; i < lines.length; i++) {
-      children.addAll(_spansForLine(lines[i], base, t));
+      // The very first line is always the note's H1 title, styled as such even without a
+      // leading "#": Notely keeps the first line == the filename.
+      children.addAll(_spansForLine(lines[i], base, t, isFirst: i == 0));
       if (i != lines.length - 1) {
         children.add(TextSpan(text: '\n', style: base));
       }
@@ -42,8 +44,40 @@ class MarkdownHighlightingController extends TextEditingController {
     return TextSpan(style: base, children: children);
   }
 
-  List<InlineSpan> _spansForLine(String line, TextStyle base, NotelyTokens t) {
+  TextStyle _headingStyle(TextStyle base, NotelyTokens t, int level) =>
+      base.copyWith(
+        fontSize:
+            (base.fontSize ?? 14) * _headingScale[(level - 1).clamp(0, 5)],
+        fontWeight: FontWeight.w700,
+        color: t.textPrimary,
+        letterSpacing: -0.3,
+        height: 1.3,
+      );
+
+  List<InlineSpan> _spansForLine(
+    String line,
+    TextStyle base,
+    NotelyTokens t, {
+    bool isFirst = false,
+  }) {
     final syntax = base.copyWith(color: t.editorSyntax);
+
+    if (isFirst) {
+      // Force the title line to H1. If it carries explicit "#" markers, mute them; otherwise
+      // style the whole line as the heading.
+      final m = _heading.firstMatch(line);
+      final h1 = _headingStyle(base, t, 1);
+      if (m != null) {
+        return [
+          TextSpan(
+            text: m.group(1),
+            style: h1.copyWith(color: t.editorSyntax),
+          ),
+          TextSpan(text: m.group(2), style: h1),
+        ];
+      }
+      return [TextSpan(text: line, style: h1)];
+    }
 
     final heading = _heading.firstMatch(line);
     if (heading != null) {

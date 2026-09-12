@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../app/app_scope.dart';
@@ -74,28 +75,49 @@ class _StashPickerState extends State<StashPicker>
     await AppScope.of(context).stash.open(name: name, path: path);
   }
 
+  void _close() => AppScope.of(context).stash.dismissPicker();
+
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final canClose = AppScope.of(context).stash.canDismissPicker;
     return FadeTransition(
       opacity: _anim,
-      child: Material(
-        type: MaterialType.transparency,
-        child: Container(
-          color: t.overlayScrim,
-          alignment: Alignment.center,
-          child: ScaleTransition(
-            scale: Tween(begin: 0.985, end: 1.0).animate(
-              CurvedAnimation(parent: _anim, curve: NotelyMotion.curve),
+      child: CallbackShortcuts(
+        bindings: {
+          if (canClose)
+            const SingleActivator(LogicalKeyboardKey.escape): _close,
+        },
+        child: Focus(
+          autofocus: true,
+          child: Material(
+            type: MaterialType.transparency,
+            child: Stack(
+              children: [
+                // Tap the dimmed backdrop to cancel (only when there's a stash to return to).
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: canClose ? _close : null,
+                    child: Container(color: t.overlayScrim),
+                  ),
+                ),
+                Center(
+                  child: ScaleTransition(
+                    scale: Tween(begin: 0.985, end: 1.0).animate(
+                      CurvedAnimation(parent: _anim, curve: NotelyMotion.curve),
+                    ),
+                    child: _card(t, canClose),
+                  ),
+                ),
+              ],
             ),
-            child: _card(t),
           ),
         ),
       ),
     );
   }
 
-  Widget _card(NotelyTokens t) {
+  Widget _card(NotelyTokens t, bool canClose) {
     return Container(
       width: 440,
       padding: const EdgeInsets.all(28),
@@ -134,6 +156,8 @@ class _StashPickerState extends State<StashPicker>
                   color: t.textPrimary,
                 ),
               ),
+              const Spacer(),
+              if (canClose) _CloseButton(onTap: _close),
             ],
           ),
           const SizedBox(height: 8),
@@ -281,6 +305,48 @@ class _StashPickerState extends State<StashPicker>
         child: Text(
           label,
           style: NotelyType.button.copyWith(fontSize: 13, color: t.onAccent),
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact close (X) affordance in the modal corner.
+class _CloseButton extends StatefulWidget {
+  const _CloseButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  State<_CloseButton> createState() => _CloseButtonState();
+}
+
+class _CloseButtonState extends State<_CloseButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Tooltip(
+      message: 'Close  (Esc)',
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: NotelyMotion.fast,
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: _hover ? t.hover : Colors.transparent,
+              borderRadius: BorderRadius.circular(NotelyDims.radiusSmall),
+            ),
+            child: Icon(
+              Icons.close_rounded,
+              size: 17,
+              color: _hover ? t.textSecondary : t.textFaint,
+            ),
+          ),
         ),
       ),
     );

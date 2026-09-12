@@ -101,8 +101,9 @@ class _AppGate extends StatelessWidget {
             // The workspace is always mounted so it reads as "subdued behind the modal",
             // matching the Obsidian open-vault feel. It's inert until a stash is open.
             const WorkspaceShell(),
-            // While restoring the persisted stash, keep the picker hidden to avoid a flash.
-            if (!stash.isOpen && !stash.isRestoring) const StashPicker(),
+            // Shown when no stash is open, or when switching over the current one. Hidden
+            // during the initial restore to avoid a flash.
+            if (stash.showPicker && !stash.isRestoring) const StashPicker(),
           ],
         );
       },

@@ -311,6 +311,40 @@ class ExplorerController extends ChangeNotifier {
     }
   }
 
+  /// Derive a filename (without extension) from a note's first line / H1 title. Strips any
+  /// leading Markdown heading markers and characters illegal in filenames. Returns null when
+  /// nothing usable remains.
+  static String? titleToFileName(String rawFirstLine) {
+    var s = rawFirstLine.replaceFirst(RegExp(r'^\s*#{1,6}\s*'), '');
+    s = s.replaceAll(RegExp(r'[\\/:*?"<>|\t\n\r]'), '');
+    s = s.trim();
+    return s.isEmpty ? null : s;
+  }
+
+  /// Rename [path] so its filename matches the note's [title] (used to keep filename == H1).
+  /// Returns (oldPath, newPath) when a rename actually happened, else null (unchanged or on a
+  /// collision/error, which is surfaced via [error]).
+  Future<(String, String)?> renameForTitle(String path, String title) async {
+    try {
+      final newPath = await _fs.rename(path, title);
+      if (p.equals(newPath, path)) return null; // no effective change
+      await refresh();
+      _expandAncestors(newPath);
+      if (_selectedPath != null &&
+          (p.equals(_selectedPath!, path) ||
+              p.isWithin(path, _selectedPath!))) {
+        _selectedPath = _remap(_selectedPath!, path, newPath);
+      }
+      _error = null;
+      notifyListeners();
+      return (path, newPath);
+    } on FileSystemException catch (e) {
+      _error = e.message;
+      notifyListeners();
+      return null;
+    }
+  }
+
   /// Delete [path] (folders recursively). Returns true on success.
   Future<bool> delete(String path) async {
     try {

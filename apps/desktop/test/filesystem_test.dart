@@ -90,8 +90,28 @@ void main() {
     expect(controller.name, 'Work');
     expect(controller.path, tempRoot.path);
 
-    await controller.close();
-    expect(controller.isOpen, isFalse);
-    expect(await store.load(), isNull);
+    // Opening records the stash in recents and persists it as current.
+    await controller.open(name: 'Work', path: tempRoot.path);
+    expect(controller.recents.map((c) => c.path), contains(tempRoot.path));
+    final reloaded = await store.load();
+    expect(reloaded?.path, tempRoot.path);
   });
+
+  test(
+    'StashController switch picker overlay can be requested and dismissed',
+    () async {
+      final store = StashStore();
+      final controller = StashController(store: store);
+      await controller.open(name: 'A', path: tempRoot.path);
+      expect(controller.showPicker, isFalse);
+      expect(controller.canDismissPicker, isTrue);
+
+      controller.requestPicker();
+      expect(controller.showPicker, isTrue); // overlay over the open stash
+
+      controller.dismissPicker();
+      expect(controller.showPicker, isFalse); // back to workspace, stash intact
+      expect(controller.isOpen, isTrue);
+    },
+  );
 }
