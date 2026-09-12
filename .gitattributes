@@ -1,0 +1,15 @@
+# Normalize line endings.
+* text=auto eol=lf
+*.sh text eol=lf
+
+# Treat these as binary (never diff/merge, never CRLF-mangle).
+*.wav binary
+*.mp3 binary
+*.m4a binary
+*.flac binary
+*.png binary
+*.pdf binary
+
+# Keep generated lockfiles out of language-stats and collapse them in diffs.
+Cargo.lock linguist-generated=true
+apps/desktop/pubspec.lock linguist-generated=true

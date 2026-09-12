@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://notely.ai/schema/ipc.schema.json",
+  "title": "Notely IPC protocol",
+  "description": "Canonical, language-neutral schema for the Flutter <-> Rust IPC contract. Mirrored by engine/src/ipc and apps/desktop/lib/ipc. See packages/protocol/README.md.",
+  "protocolVersion": 1,
+  "definitions": {
+    "Request": {
+      "description": "Flutter -> Engine commands. Tagged by `type` with a `params` object.",
+      "oneOf": [
+        { "properties": { "type": { "const": "StartMeeting" }, "params": { "properties": { "title": { "type": ["string", "null"] } } } } },
+        { "properties": { "type": { "const": "ImportMeeting" }, "params": { "properties": { "source_path": { "type": "string" } }, "required": ["source_path"] } } },
+        { "properties": { "type": { "const": "GetMeeting" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } } },
+        { "properties": { "type": { "const": "GetTranscript" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } } },
+        { "properties": { "type": { "const": "GetMom" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } } },
+        { "properties": { "type": { "const": "CancelJob" }, "params": { "properties": { "job_id": { "type": "string" } }, "required": ["job_id"] } } }
+      ]
+    },
+    "Response": {
+      "description": "Immediate engine response. Long work continues via Event.",
+      "oneOf": [
+        { "properties": { "type": { "const": "JobAccepted" }, "data": { "properties": { "job_id": { "type": "string" } }, "required": ["job_id"] } } },
+        { "properties": { "type": { "const": "Data" }, "data": { "properties": { "json": {} } } } },
+        { "properties": { "type": { "const": "Error" }, "data": { "properties": { "message": { "type": "string" } }, "required": ["message"] } } }
+      ]
+    },
+    "Event": {
+      "description": "Engine -> Flutter async job progress/lifecycle events.",
+      "properties": {
+        "type": {
+          "enum": [
+            "JobCreated",
+            "TranscriptionStarted",
+            "TranscriptionProgress",
+            "AnalysisStarted",
+            "MomGenerated",
+            "JobCompleted",
+            "JobFailed"
+          ]
+        }
+      }
+    }
+  }
+}

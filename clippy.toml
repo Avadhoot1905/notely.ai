@@ -1,0 +1,3 @@
+# Clippy configuration for the Notely engine.
+# Keep this conservative for v0; tighten as the codebase matures.
+too-many-arguments-threshold = 8

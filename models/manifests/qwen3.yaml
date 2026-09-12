@@ -1,0 +1,12 @@
+# Manifest for the local reasoning/LLM model.
+#
+# This is METADATA ONLY. No weights live in this repo — the runtime resolves and downloads
+# the model into a user/cache location (e.g. Ollama's model store). See models/README.md.
+name: qwen3
+role: reasoning            # extraction / synthesis / validation
+provider: ollama          # runtime that serves this model (see engine/src/llm)
+model_ref: qwen3          # tag/name passed to the runtime, e.g. `ollama pull qwen3`
+context_length: 32768
+quantization: q4_k_m
+notes: >
+  Default local model for producing the Meeting IR. Swappable — the engine is model-agnostic.

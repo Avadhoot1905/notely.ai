@@ -1,0 +1,37 @@
+# === Rust ===
+/target/
+**/*.rs.bk
+
+# === Flutter / Dart ===
+apps/desktop/.dart_tool/
+apps/desktop/.flutter-plugins
+apps/desktop/.flutter-plugins-dependencies
+apps/desktop/build/
+apps/desktop/.pub-cache/
+apps/desktop/.pub/
+apps/desktop/ios/
+apps/desktop/android/
+apps/desktop/linux/
+apps/desktop/web/
+**/Flutter/ephemeral/
+**/Pods/
+
+# === Models (weights are NEVER committed — only manifests under models/manifests/) ===
+models/**
+!models/README.md
+!models/manifests/
+!models/manifests/**
+
+# === Local, user-generated data / fixtures binaries ===
+data/fixtures/audio/*
+!data/fixtures/audio/.gitkeep
+
+# === Editors / OS ===
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# === Env / secrets ===
+.env
+.env.*

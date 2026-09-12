@@ -1,0 +1,28 @@
+# Root Cargo workspace.
+#
+# For v0 there is exactly ONE Rust package: `engine`. This workspace exists so
+# the repository is ready for future growth (e.g. a shared crate or a CLI) WITHOUT
+# forcing a premature split today. Do not add crates here merely for architectural
+# purity — the engine is intentionally a single, internally-modular package.
+[workspace]
+resolver = "2"
+members = ["engine"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/notely-ai/notely.ai"
+
+# Shared dependency versions live here so future crates stay in sync.
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"

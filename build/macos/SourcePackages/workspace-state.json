@@ -1,0 +1,27 @@
+{
+  "object" : {
+    "artifacts" : [
+
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "flutterframework",
+          "kind" : "fileSystem",
+          "location" : "/Users/avi19/Documents/projects/notely.ai/apps/desktop/macos/Flutter/ephemeral/Packages/.packages/FlutterFramework",
+          "name" : "FlutterFramework"
+        },
+        "state" : {
+          "name" : "fileSystem",
+          "path" : "/Users/avi19/Documents/projects/notely.ai/apps/desktop/macos/Flutter/ephemeral/Packages/.packages/FlutterFramework"
+        },
+        "subpath" : "flutterframework"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

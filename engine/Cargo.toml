@@ -1,0 +1,20 @@
+[package]
+name = "notely-engine"
+description = "Notely local engine: media, ASR, AI, LLM runtime, storage and rendering behind an IPC boundary."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "notely-engine"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

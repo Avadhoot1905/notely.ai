@@ -1,0 +1,12 @@
+# Manifest for the local ASR (speech recognition) model.
+#
+# METADATA ONLY — no weights in the repo. The ASR provider downloads the model into its
+# own cache. See models/README.md.
+name: whisper
+role: asr
+provider: whisper         # concrete ASR backend (see engine/src/asr/whisper.rs)
+model_ref: large-v3       # which Whisper checkpoint to use
+languages: multilingual   # Notely targets multilingual / code-switched meetings
+quantization: null
+notes: >
+  Default local ASR. The pipeline depends on the AsrProvider trait, not on Whisper directly.
