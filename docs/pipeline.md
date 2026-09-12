@@ -5,34 +5,64 @@ progress events they emit. It contains **no** provider-specific implementations;
 on the abstractions each module exposes.
 
 ```text
-input meeting
+input (audio OR transcript)
     ↓
-media processing        (media/)   FFmpeg extract/normalize → VAD segment
+media processing        (media/)      FFmpeg → normalized mono audio      [audio only]
     ↓
-ASR                     (asr/)     AsrProvider → canonical Transcript
+ASR                     (asr/)        Qwen3-ASR (separate runtime) → raw Transcript  [audio only]
     ↓
-transcript processing   (domain)   merge segments, attach speakers, cleanup
+deterministic prep      (preprocess/) normalize (whitespace/order/timestamps) + chunk
     ↓
-AI extraction           (ai/)      decisions / action items / participants (+ evidence)
+AI extraction           (ai/)         per chunk: Qwen3 1.7B → ChunkFindings (+ grounded evidence)
     ↓
-AI synthesis            (ai/)      summary, topic grouping → assemble Meeting IR
+AI synthesis            (ai/)         consolidate findings → Meeting IR; reconcile provenance
     ↓
-Meeting IR validation   (ai/)      structural + evidence checks (optional LLM verify pass)
+Meeting IR validation   (ai/)         deterministic structural checks
     ↓
-rendering               (renderer/) deterministic IR → Markdown / HTML / JSON
+rendering               (renderer/)   deterministic IR → Markdown / JSON
     ↓
-storage                 (storage/) persist meeting, transcript, IR, MOM
+storage                 (storage/)    persist meeting, raw transcript, IR, MOM
 ```
+
+If the input is already a transcript, the media + ASR stages are skipped.
 
 ## Responsibilities
 
-- The **orchestrator** (`pipeline/orchestrator.rs`) sequences the stages and emits IPC events
-  (`TRANSCRIPTION_PROGRESS`, `ANALYSIS_STARTED`, `MOM_GENERATED`, …) via a job.
-- Each stage is reached through a **trait**, not a concrete backend:
-  `AsrProvider`, `AiProvider`, `LlmProvider`, repository traits, renderer functions.
-- **Jobs** (`pipeline/jobs.rs`) model a tracked run so the UI can show progress and cancel.
+- The **orchestrator** (`pipeline/orchestrator.rs`) sequences the stages and emits granular IPC
+  events per stage (see below) via a job. It calls the two AI passes explicitly —
+  `extract_chunk` per chunk, then `synthesize` — so it can report extraction progress.
+- Each stage is reached through a **trait or deterministic helper**, never a concrete backend:
+  `AsrProvider`, `AiAnalyzer`, `LlmProvider`, `Store`, `preprocess::prepare`, `renderer::markdown`.
+- **Jobs** (`pipeline/jobs.rs`) model a tracked, cancellable run; cancellation is checked between
+  stages and between chunks.
 
 This keeps the ordering logic stable while implementations are swapped underneath.
+
+## Progress events
+
+Emitted on the IPC event stream (`ipc/events.rs`); granular where a stage can measure it,
+stage-level otherwise (never faked):
+
+```text
+JobCreated → ProcessingStarted
+  → MediaProcessingStarted/Completed        [audio only]
+  → TranscriptionStarted/Completed          [audio only]
+  → ChunkingStarted/Completed{chunk_count}
+  → ExtractionStarted{n} → ExtractionProgress{i/n}… → ExtractionCompleted
+  → SynthesisStarted/Completed
+  → ValidationStarted/Completed
+  → RenderingStarted/Completed
+  → JobCompleted | JobFailed
+```
+
+## Status (v0)
+
+- **Implemented and proven end-to-end** (`transcript → chunking → Qwen3 1.7B extraction →
+  synthesis → Meeting IR → Markdown`) against a real local model — see
+  `engine/tests/ollama_smoke.rs` and `cargo run --example transcript_to_mom`.
+- **Scaffolded (clean boundary, not run end-to-end here):** the `audio → media → ASR` head.
+  FFmpeg normalization is implemented; Qwen3-ASR is implemented as an HTTP client to a separate
+  runtime. Running it live needs FFmpeg installed and a Qwen3-ASR runtime reachable.
 
 ## Processing modes (planned)
 

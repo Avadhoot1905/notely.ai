@@ -27,7 +27,11 @@ pub struct ActionItem {
     pub deadline: Option<String>,
     #[serde(default)]
     pub status: ActionStatus,
-    /// Where in the transcript this task was assigned.
+    /// Where in the transcript this task was assigned. Each [`Evidence`] carries the `source_chunk`
+    /// (`chunk_id`) and `source_timestamp` (`start`/`end`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<Evidence>,
+    /// Model-reported confidence in [0,1], when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }

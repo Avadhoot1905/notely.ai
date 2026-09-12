@@ -1,0 +1,15 @@
+{
+  "segments": [
+    { "speaker_id": "S1", "start": 0.0, "end": 6.0, "text": "Morning everyone. Quick weekly sync. How was the long weekend, did anyone get out of the city?", "language": "en" },
+    { "speaker_id": "S2", "start": 6.0, "end": 12.0, "text": "Went hiking, it was great. Also the coffee machine on the third floor is finally fixed, by the way.", "language": "en" },
+    { "speaker_id": "S1", "start": 12.0, "end": 20.0, "text": "Nice. Okay, let's get into it. Main thing today: we need to decide whether to cut the CSV export from the v0 release.", "language": "en" },
+    { "speaker_id": "S3", "start": 20.0, "end": 31.0, "text": "I think we should cut CSV export from v0. It's not core and it's eating time we need for stability. We can add it in v0.1.", "language": "en" },
+    { "speaker_id": "S1", "start": 31.0, "end": 38.0, "text": "Agreed. Decision: CSV export is out of v0 and moves to v0.1. Everyone okay with that? Okay, decided.", "language": "en" },
+    { "speaker_id": "S2", "start": 38.0, "end": 49.0, "text": "On stability — I'll take the crash on the settings screen. I'll have a fix up by Thursday. That's my action item.", "language": "en" },
+    { "speaker_id": "S3", "start": 49.0, "end": 60.0, "text": "And I'll write the migration guide for the new config format. I can get a draft to the team by next Monday.", "language": "en" },
+    { "speaker_id": "S1", "start": 60.0, "end": 72.0, "text": "Good. One thing I'm not sure about: do we need a feature flag for the new onboarding, or do we just ship it to everyone? Let's leave that open for now and revisit.", "language": "en" },
+    { "speaker_id": "S3", "start": 72.0, "end": 83.0, "text": "A risk I want to flag: if the migration isn't done before we cut the release branch, existing users could hit a broken config on upgrade. We should watch that closely.", "language": "en" },
+    { "speaker_id": "S2", "start": 83.0, "end": 90.0, "text": "Yeah. Also unrelated, lunch order form is due at noon if anyone wants in. That's it from me.", "language": "en" },
+    { "speaker_id": "S1", "start": 90.0, "end": 96.0, "text": "Great, thanks all. Let's sync again next week." }
+  ]
+}

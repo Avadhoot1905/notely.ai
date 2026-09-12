@@ -1,5 +1,6 @@
-//! Orchestrator tests using fakes for every provider, verifying that stages run in the correct
-//! order — and that the transcript path skips media + ASR. No Ollama, FFmpeg, or DB required.
+//! Orchestrator tests using fakes for every provider, verifying the full stage order —
+//! media → ASR → chunking → extraction → synthesis → render/store — and that the transcript path
+//! skips media + ASR. No Ollama, ASR runtime, FFmpeg, or DB required.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -7,17 +8,30 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 
 use notely_engine::ai::provider::{AiAnalyzer, AiError, AnalysisContext};
+use notely_engine::ai::ChunkFindings;
 use notely_engine::asr::provider::{AsrError, AsrProvider, AudioInput};
+use notely_engine::config::ChunkingConfig;
 use notely_engine::domain::{Meeting, MeetingId, MeetingIr, Transcript, TranscriptSegment};
 use notely_engine::media::{ExtractOptions, MediaError, MediaInfo, MediaProcessor, PreparedAudio};
 use notely_engine::pipeline::{JobRegistry, MeetingInput, Orchestrator};
+use notely_engine::preprocess::Chunk;
 use notely_engine::storage::{StorageError, Store};
 
-/// Shared ordered log of calls across all fakes.
 type Calls = Arc<Mutex<Vec<String>>>;
 
 fn record(calls: &Calls, what: &str) {
     calls.lock().unwrap().push(what.to_string());
+}
+
+fn seg(text: &str) -> TranscriptSegment {
+    TranscriptSegment {
+        speaker_id: Some("S1".into()),
+        start: 0.0,
+        end: 1.0,
+        text: text.to_string(),
+        language: None,
+        confidence: None,
+    }
 }
 
 struct FakeMedia(Calls);
@@ -51,13 +65,7 @@ impl AsrProvider for FakeAsr {
     async fn transcribe(&self, _audio: &AudioInput) -> Result<Transcript, AsrError> {
         record(&self.0, "asr.transcribe");
         Ok(Transcript {
-            segments: vec![TranscriptSegment {
-                speaker_id: Some("S1".into()),
-                start: 0.0,
-                end: 1.0,
-                text: "from asr".into(),
-                language: None,
-            }],
+            segments: vec![seg("from asr")],
         })
     }
 }
@@ -65,12 +73,21 @@ impl AsrProvider for FakeAsr {
 struct FakeAi(Calls);
 #[async_trait]
 impl AiAnalyzer for FakeAi {
-    async fn analyze(
+    async fn extract_chunk(
         &self,
+        _chunk: &Chunk,
+        _context: &AnalysisContext,
+    ) -> Result<ChunkFindings, AiError> {
+        record(&self.0, "ai.extract_chunk");
+        Ok(ChunkFindings::default())
+    }
+    async fn synthesize(
+        &self,
+        _findings: &[ChunkFindings],
         _transcript: &Transcript,
         _context: &AnalysisContext,
     ) -> Result<MeetingIr, AiError> {
-        record(&self.0, "ai.analyze");
+        record(&self.0, "ai.synthesize");
         Ok(MeetingIr {
             summary: "fake summary".into(),
             ..Default::default()
@@ -123,16 +140,23 @@ fn orchestrator(calls: &Calls) -> (Orchestrator, JobRegistry) {
         Arc::new(FakeStore(calls.clone())),
         jobs.clone(),
         std::env::temp_dir(),
+        ChunkingConfig::default(),
     );
     (orch, jobs)
 }
 
+fn pos(log: &[String], needle: &str) -> usize {
+    log.iter()
+        .position(|c| c == needle)
+        .unwrap_or_else(|| panic!("missing call: {needle} in {log:?}"))
+}
+
 #[tokio::test]
-async fn audio_input_runs_media_then_asr_then_ai_then_render_store() {
+async fn audio_input_runs_media_asr_chunk_extract_synthesize_then_store() {
     let calls: Calls = Arc::new(Mutex::new(Vec::new()));
     let (orch, jobs) = orchestrator(&calls);
     let (job_id, cancel) = jobs.create();
-    let (events, _rx) = tokio::sync::broadcast::channel(16);
+    let (events, _rx) = tokio::sync::broadcast::channel(64);
 
     orch.process(
         &job_id,
@@ -147,43 +171,34 @@ async fn audio_input_runs_media_then_asr_then_ai_then_render_store() {
     .expect("pipeline succeeds");
 
     let log = calls.lock().unwrap().clone();
-    // Media → ASR → (transcript saved) → AI → (IR saved) → MOM saved.
-    let media = log.iter().position(|c| c == "media.extract_audio").unwrap();
-    let asr = log.iter().position(|c| c == "asr.transcribe").unwrap();
-    let save_t = log
-        .iter()
-        .position(|c| c == "store.save_transcript")
-        .unwrap();
-    let ai = log.iter().position(|c| c == "ai.analyze").unwrap();
-    let save_ir = log
-        .iter()
-        .position(|c| c == "store.save_meeting_ir")
-        .unwrap();
-    let save_mom = log.iter().position(|c| c == "store.save_mom").unwrap();
+    let media = pos(&log, "media.extract_audio");
+    let asr = pos(&log, "asr.transcribe");
+    let save_t = pos(&log, "store.save_transcript");
+    let extract = pos(&log, "ai.extract_chunk");
+    let synth = pos(&log, "ai.synthesize");
+    let save_ir = pos(&log, "store.save_meeting_ir");
+    let save_mom = pos(&log, "store.save_mom");
     assert!(media < asr, "media before asr");
     assert!(asr < save_t, "asr before transcript save");
-    assert!(save_t < ai, "transcript saved before analysis");
-    assert!(ai < save_ir, "analysis before IR save");
+    assert!(
+        save_t < extract,
+        "transcript saved (then chunked) before extraction"
+    );
+    assert!(extract < synth, "extraction before synthesis");
+    assert!(synth < save_ir, "synthesis before IR save");
     assert!(save_ir < save_mom, "IR saved before MOM save");
 }
 
 #[tokio::test]
-async fn transcript_input_skips_media_and_asr() {
+async fn transcript_input_skips_media_and_asr_but_still_extracts_and_synthesizes() {
     let calls: Calls = Arc::new(Mutex::new(Vec::new()));
     let (orch, jobs) = orchestrator(&calls);
     let (job_id, cancel) = jobs.create();
-    let (events, _rx) = tokio::sync::broadcast::channel(16);
+    let (events, _rx) = tokio::sync::broadcast::channel(64);
 
     let transcript = Transcript {
-        segments: vec![TranscriptSegment {
-            speaker_id: Some("S1".into()),
-            start: 0.0,
-            end: 1.0,
-            text: "provided".into(),
-            language: None,
-        }],
+        segments: vec![seg("provided")],
     };
-
     orch.process(
         &job_id,
         MeetingInput::Transcript {
@@ -199,13 +214,14 @@ async fn transcript_input_skips_media_and_asr() {
     let log = calls.lock().unwrap().clone();
     assert!(
         !log.iter().any(|c| c.starts_with("media")),
-        "media must be skipped: {log:?}"
+        "media skipped: {log:?}"
     );
     assert!(
         !log.iter().any(|c| c.starts_with("asr")),
-        "asr must be skipped: {log:?}"
+        "asr skipped: {log:?}"
     );
-    assert!(log.iter().any(|c| c == "ai.analyze"));
+    assert!(log.iter().any(|c| c == "ai.extract_chunk"));
+    assert!(log.iter().any(|c| c == "ai.synthesize"));
     assert!(log.iter().any(|c| c == "store.save_mom"));
 }
 
@@ -214,8 +230,8 @@ async fn cancellation_before_run_stops_the_pipeline() {
     let calls: Calls = Arc::new(Mutex::new(Vec::new()));
     let (orch, jobs) = orchestrator(&calls);
     let (job_id, cancel) = jobs.create();
-    cancel.cancel(); // cancel up-front
-    let (events, _rx) = tokio::sync::broadcast::channel(16);
+    cancel.cancel();
+    let (events, _rx) = tokio::sync::broadcast::channel(64);
 
     let result = orch
         .process(
@@ -232,7 +248,7 @@ async fn cancellation_before_run_stops_the_pipeline() {
     assert!(result.is_err(), "cancelled run should error");
     let log = calls.lock().unwrap().clone();
     assert!(
-        !log.iter().any(|c| c == "ai.analyze"),
-        "analysis must not run after cancel: {log:?}"
+        !log.iter().any(|c| c == "ai.extract_chunk"),
+        "no extraction after cancel: {log:?}"
     );
 }

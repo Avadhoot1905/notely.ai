@@ -1,7 +1,7 @@
 //! Render a [`MeetingIr`] to a Markdown MOM document.
 //!
-//! Fully deterministic templating — the same IR always yields the same bytes. An LLM is NEVER
-//! used to format the MOM. Section order matches the field order of [`MeetingIr`].
+//! Fully deterministic templating — the same IR always yields the same bytes. An LLM is NEVER used
+//! to format the MOM. Section order matches the field order of [`MeetingIr`].
 
 use std::fmt::Write as _;
 
@@ -17,6 +17,7 @@ pub fn render_with_title(ir: &MeetingIr, title: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "# {title}\n");
 
+    // Summary
     let _ = writeln!(out, "## Summary\n");
     if ir.summary.trim().is_empty() {
         let _ = writeln!(out, "_No summary._\n");
@@ -54,7 +55,7 @@ pub fn render_with_title(ir: &MeetingIr, title: &str) -> String {
                     let _ = writeln!(out, "{}\n", s.trim());
                 }
             }
-            write_evidence(&mut out, &t.evidence);
+            write_evidence_quotes(&mut out, &t.evidence);
         }
     }
 
@@ -75,26 +76,22 @@ pub fn render_with_title(ir: &MeetingIr, title: &str) -> String {
         out.push('\n');
     }
 
-    // Action items
+    // Action items — a stable table.
     let _ = writeln!(out, "## Action Items\n");
     if ir.action_items.is_empty() {
         let _ = writeln!(out, "_None._\n");
     } else {
+        let _ = writeln!(out, "| Action | Owner | Deadline | Status |");
+        let _ = writeln!(out, "|--------|-------|----------|--------|");
         for a in &ir.action_items {
-            let checkbox = matches!(
-                a.status,
-                crate::domain::ActionStatus::Done | crate::domain::ActionStatus::Cancelled
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} |",
+                cell(&a.description),
+                cell(a.owner.as_deref().unwrap_or("—")),
+                cell(a.deadline.as_deref().unwrap_or("—")),
+                status_label(a.status),
             );
-            let mark = if checkbox { "x" } else { " " };
-            let _ = write!(out, "- [{mark}] {}", a.description.trim());
-            if let Some(owner) = &a.owner {
-                let _ = write!(out, " — _{owner}_");
-            }
-            if let Some(deadline) = &a.deadline {
-                let _ = write!(out, " (due {deadline})");
-            }
-            out.push('\n');
-            write_evidence_inline(&mut out, &a.evidence);
         }
         out.push('\n');
     }
@@ -138,7 +135,23 @@ pub fn render_with_title(ir: &MeetingIr, title: &str) -> String {
     out
 }
 
-fn write_evidence(out: &mut String, evidence: &[Evidence]) {
+fn status_label(status: crate::domain::ActionStatus) -> &'static str {
+    use crate::domain::ActionStatus::*;
+    match status {
+        Open => "open",
+        InProgress => "in progress",
+        Done => "done",
+        Cancelled => "cancelled",
+    }
+}
+
+/// Escape a table cell: collapse newlines and escape pipes so the table stays well-formed.
+fn cell(s: &str) -> String {
+    s.trim().replace('\n', " ").replace('|', "\\|")
+}
+
+/// True if any evidence entry has a non-empty quote (provenance-only markers are skipped in prose).
+fn write_evidence_quotes(out: &mut String, evidence: &[Evidence]) {
     for e in evidence {
         if e.quote.trim().is_empty() {
             continue;
@@ -159,13 +172,17 @@ fn write_evidence_inline(out: &mut String, evidence: &[Evidence]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ActionItem, Decision, MeetingIr};
+    use crate::domain::{ActionItem, Decision, Evidence, MeetingIr};
 
     fn sample() -> MeetingIr {
         MeetingIr {
             summary: "Planned the v0 launch.".into(),
             decisions: vec![Decision {
                 decision: "Ship behind a flag".into(),
+                evidence: vec![Evidence {
+                    quote: "let's flag it".into(),
+                    ..Default::default()
+                }],
                 ..Default::default()
             }],
             action_items: vec![ActionItem {
@@ -196,11 +213,27 @@ mod tests {
         ] {
             assert!(a.contains(section), "missing section: {section}");
         }
-        assert!(a.contains("Planned the v0 launch."));
-        assert!(a.contains("Ship behind a flag"));
-        assert!(a.contains("Write migration"));
-        assert!(a.contains("Avi"));
-        assert!(a.contains("due Friday"));
+    }
+
+    #[test]
+    fn action_items_render_as_a_table() {
+        let out = render_with_title(&sample(), "Planning");
+        assert!(out.contains("| Action | Owner | Deadline | Status |"));
+        assert!(out.contains("| Write migration | Avi | Friday | open |"));
+    }
+
+    #[test]
+    fn missing_owner_and_deadline_render_as_dashes_not_invented() {
+        let ir = MeetingIr {
+            summary: "s".into(),
+            action_items: vec![ActionItem {
+                description: "do it".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let out = render(&ir);
+        assert!(out.contains("| do it | — | — | open |"));
     }
 
     #[test]

@@ -20,6 +20,7 @@ pub mod ipc;
 pub mod llm;
 pub mod media;
 pub mod pipeline;
+pub mod preprocess;
 pub mod renderer;
 pub mod storage;
 
@@ -27,16 +28,16 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::ai::LlmAiEngine;
-use crate::asr::WhisperProvider;
+use crate::ai::{AiAnalyzer, AnalysisContext, LlmAiEngine};
 use crate::config::Config;
-use crate::domain::{Meeting, MeetingId, Transcript};
+use crate::domain::{Meeting, MeetingId, MeetingIr, Transcript};
 use crate::ipc::events::Event;
 use crate::ipc::protocol::{HealthInfo, ProcessInput, Request, Response, PROTOCOL_VERSION};
 use crate::llm::{LlmProvider, OllamaProvider};
 use crate::media::FfmpegMediaProcessor;
 use crate::pipeline::jobs::JobId;
 use crate::pipeline::{JobRegistry, MeetingInput, Orchestrator};
+use crate::renderer::markdown;
 use crate::storage::{SqliteStore, Store};
 
 /// Capacity of the per-engine event broadcast buffer.
@@ -50,6 +51,7 @@ pub struct Engine {
     config: Config,
     store: Arc<dyn Store>,
     llm: Arc<dyn LlmProvider>,
+    ai: Arc<dyn AiAnalyzer>,
     jobs: JobRegistry,
     orchestrator: Orchestrator,
     events: broadcast::Sender<Event>,
@@ -57,30 +59,35 @@ pub struct Engine {
 
 impl Engine {
     /// Initialize storage and providers from configuration and wire up the pipeline.
+    ///
+    /// Two independent runtimes are wired here: the LLM (Ollama) and ASR (a separate runtime; the
+    /// default Qwen3-ASR provider is HTTP-based — see `engine/src/asr`).
     pub fn new(config: Config) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&config.data_dir)?;
         let store: Arc<dyn Store> = Arc::new(SqliteStore::open(config.database_path())?);
         let llm: Arc<dyn LlmProvider> = Arc::new(OllamaProvider::new(&config.ollama)?);
 
         let media = Arc::new(FfmpegMediaProcessor::new());
-        let asr = Arc::new(WhisperProvider);
-        let ai = Arc::new(LlmAiEngine::new(llm.clone()));
+        let asr = asr::from_config(&config.asr)?; // Qwen3-ASR by default (separate runtime).
+        let ai: Arc<dyn AiAnalyzer> = Arc::new(LlmAiEngine::new(llm.clone()));
         let jobs = JobRegistry::new();
         let (events, _rx) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
 
         let orchestrator = Orchestrator::new(
             media,
             asr,
-            ai,
+            ai.clone(),
             store.clone(),
             jobs.clone(),
             config.data_dir.clone(),
+            config.chunking.clone(),
         );
 
         Ok(Self {
             config,
             store,
             llm,
+            ai,
             jobs,
             orchestrator,
             events,
@@ -130,6 +137,7 @@ impl Engine {
             engine_ok: true,
             llm_ok,
             model: self.config.ollama.model.clone(),
+            asr_provider: format!("{:?}", self.config.asr.provider).to_lowercase(),
         }
     }
 
@@ -218,6 +226,23 @@ impl Engine {
         Ok(id)
     }
 
+    /// Run the full deterministic-prep + two-pass AI analysis on a transcript and return the
+    /// Meeting IR and rendered Markdown — without storage or events. Used by the example and the
+    /// end-to-end smoke test to inspect intermediate results.
+    pub async fn analyze_transcript(
+        &self,
+        title: Option<String>,
+        transcript: &Transcript,
+    ) -> anyhow::Result<(MeetingIr, String)> {
+        let prepared = crate::preprocess::prepare(transcript, &self.config.chunking);
+        let context = AnalysisContext {
+            title: title.clone(),
+        };
+        let ir = crate::ai::analyze(self.ai.as_ref(), &prepared, &context).await?;
+        let markdown = markdown::render_with_title(&ir, title.as_deref().unwrap_or("Meeting"));
+        Ok((ir, markdown))
+    }
+
     pub fn config(&self) -> &Config {
         &self.config
     }
@@ -232,7 +257,8 @@ pub async fn run() -> anyhow::Result<()> {
     init_logging(&config);
 
     tracing::info!(
-        model = %config.ollama.model,
+        llm_model = %config.ollama.model,
+        asr_provider = ?config.asr.provider,
         data_dir = %config.data_dir.display(),
         ipc = %config.ipc_addr,
         "starting notely-engine (protocol v{PROTOCOL_VERSION})"

@@ -32,6 +32,12 @@ pub enum AsrError {
     NotImplemented(&'static str),
     #[error("audio input not found: {0}")]
     InputNotFound(PathBuf),
+    /// The ASR runtime could not be reached (e.g. the Qwen3-ASR server is not running).
+    #[error("could not reach the ASR runtime: {0}")]
+    Unreachable(String),
+    /// The ASR runtime returned an error or an undecodable response.
+    #[error("ASR runtime error: {0}")]
+    Runtime(String),
     #[error("transcription failed: {0}")]
     Failed(String),
 }

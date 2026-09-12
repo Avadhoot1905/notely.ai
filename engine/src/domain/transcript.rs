@@ -17,6 +17,9 @@ pub struct TranscriptSegment {
     /// Detected language tag (e.g. "en", "hi") for multilingual meetings, if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// ASR confidence for this segment in [0,1], when the provider reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 /// The full ordered transcript for a meeting.

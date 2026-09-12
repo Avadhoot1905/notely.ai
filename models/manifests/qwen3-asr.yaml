@@ -1,0 +1,39 @@
+# Manifest for the local ASR model (SPEECH RECOGNITION).
+#
+# METADATA ONLY. No weights in this repo.
+#
+# IMPORTANT: Qwen3-ASR is NOT served by Ollama. Ollama runs text/vision LLMs and does not do
+# speech-to-text. Qwen3-ASR therefore runs on a SEPARATE ASR runtime, and Notely's engine reaches
+# it over HTTP via the `Qwen3AsrProvider` (see engine/src/asr/qwen3_asr.rs). This keeps the two
+# concerns cleanly separated:
+#
+#   Qwen3-ASR  -> ASR runtime (HTTP)      -> speech recognition
+#   Qwen3 1.7B -> Ollama                  -> meeting understanding
+
+name: qwen3-asr
+family: qwen3
+task: speech-recognition
+runtime: qwen3-asr-http        # a local Qwen3-ASR inference server exposing an HTTP endpoint
+model: qwen3-asr               # identifier understood by that runtime
+languages: multilingual        # Notely targets multilingual / code-switched meetings
+diarization: false             # Qwen3-ASR does not provide speaker diarization; Notely does NOT fake speakers
+structured_output: false
+purpose: >
+  Transcribe normalized audio (produced by FFmpeg) into Notely's canonical Transcript, preserving
+  timestamps, language, and confidence where the runtime provides them.
+
+runtime_contract:
+  # The engine POSTs prepared audio and expects segment-level JSON. See engine/src/asr/qwen3_asr.rs
+  # for the exact request/response mapping (endpoint configurable via NOTELY_ASR_URL).
+  endpoint: "POST {NOTELY_ASR_URL}/v1/transcribe"
+  response: "{ language?, text?, segments: [{ start, end, text, speaker?, confidence?, language? }] }"
+
+install:
+  - "Run a local Qwen3-ASR inference server that exposes the runtime_contract above."
+  - "Point the engine at it with NOTELY_ASR_URL (default http://localhost:9000)."
+  - "No open-weights local Qwen3-ASR is bundled; provide your own runtime. Whisper remains an optional fallback provider."
+
+notes: >
+  Weights live in the ASR runtime's own store, never in this repo. If the ASR runtime is not
+  reachable, audio processing fails with a clear error (it is never faked). The transcript-first
+  path (import a transcript) does not need ASR at all.

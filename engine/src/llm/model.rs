@@ -5,8 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The v0 development model tag (Qwen3 4B, Q4_K_M). See `models/manifests/qwen3.yaml`.
-pub const DEFAULT_MODEL: &str = "qwen3:4b";
+/// The v0 development LLM tag (Qwen3 1.7B). See `models/manifests/qwen3.yaml` and
+/// [`crate::config::DEFAULT_LLM_MODEL`].
+pub const DEFAULT_MODEL: &str = "qwen3:1.7b";
 
 /// Identifies a model and its key settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,5 +29,15 @@ impl Default for ModelDescriptor {
             context_length: Some(32_768),
             quantization: Some("q4_k_m".to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_model_is_small_qwen() {
+        assert_eq!(ModelDescriptor::default().name, "qwen3:1.7b");
     }
 }

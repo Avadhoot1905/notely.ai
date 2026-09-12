@@ -1,29 +1,35 @@
-# Manifest for the local reasoning / LLM model.
+# Manifest for the local reasoning / LLM model (MEETING UNDERSTANDING).
 #
-# METADATA ONLY. No weights live in this repo. The runtime (Ollama) resolves and stores the model
-# in its own model store outside the working tree. See models/README.md.
+# METADATA ONLY. No weights live in this repo. Ollama resolves and stores the model in its own
+# model store outside the working tree. See models/README.md.
 #
-# This is the v0 DEVELOPMENT model. It was chosen for a typical dev laptop (e.g. Apple Silicon,
-# ~16-24 GB RAM): 4B params at Q4_K_M is ~2.5 GB and runs comfortably while producing usable
-# structured Meeting IR. The engine is model-agnostic — override at runtime with
-# NOTELY_OLLAMA_MODEL (e.g. `qwen3:1.7b` for lower-resource machines).
+# This is the v0 DEFAULT semantic model: Qwen3 1.7B. It is intentionally small so extraction and
+# synthesis run comfortably on a dev laptop. The engine is model-agnostic — override at runtime
+# with NOTELY_LLM_MODEL (e.g. `qwen3:4b` or `qwen3:0.6b`) to benchmark without changing the
+# pipeline.
 
-name: qwen3-4b
+name: qwen3-1.7b
 family: qwen3
+task: meeting-analysis        # extraction + synthesis of the Meeting IR
 runtime: ollama
-model: qwen3:4b          # tag passed to Ollama, e.g. `ollama pull qwen3:4b`
-parameters: 4B
-context_length: 32768    # Qwen3 supports far more; 32k is a sane default for meetings
+model: qwen3:1.7b             # tag passed to Ollama, e.g. `ollama pull qwen3:1.7b`
+parameters: 1.7B
+context_length: 32768
 quantization: q4_k_m
-approx_size: 2.5GB
-purpose: reasoning       # extraction / synthesis / validation of the Meeting IR
-structured_output: true  # constrained via Ollama's `format` JSON-schema support
+approx_size: 1.4GB
+structured_output: true       # constrained via Ollama's `format` JSON-schema support
+purpose: >
+  Understand a meeting transcript and produce the STRUCTURED Meeting IR (topics, decisions,
+  action items, questions, risks) — never the final Markdown, which Rust renders deterministically.
 
-# Alternative already-supported models for experimentation (not pulled automatically):
+install:
+  - "Install Ollama (https://ollama.com) and start it (`ollama serve`)."
+  - "ollama pull qwen3:1.7b"
+
+# Larger variants for later benchmarking (not pulled automatically):
 alternatives:
-  - model: qwen3:1.7b    # lighter; good for constrained machines
-    approx_size: 1.4GB
-
-notes: >
-  Produces the structured Meeting IR (not the final MOM). Rendering to Markdown/HTML/JSON is
-  deterministic and does not use the model. Swap freely; keep the provider/model boundary clean.
+  - model: qwen3:4b
+    parameters: 4B
+    approx_size: 2.5GB
+  - model: qwen3:0.6b
+    parameters: 0.6B

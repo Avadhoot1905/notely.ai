@@ -33,11 +33,15 @@ models/**
 *.onnx
 *.ckpt
 *.npz
-# Local runtime stores / inference caches (Ollama, HF, llama.cpp, etc.).
+# Local runtime stores / inference caches (Ollama, HF, llama.cpp, ASR runtime, etc.).
 .ollama/
 **/ollama/models/
 .cache/huggingface/
 **/*.llamafile
+# Qwen3-ASR / other ASR runtime caches and their local model stores.
+.qwen-asr/
+**/asr-cache/
+*.mlmodelc
 
 # === Local Notely runtime + generated data (lives outside the repo, but guard anyway) ===
 # Databases and app data.
@@ -53,11 +57,18 @@ models/**
 *.tmp.wav
 *.partial
 
-# === Generated media / transcripts (keep curated fixtures; ignore generated blobs) ===
+# === Generated media / transcripts / Meeting IR (keep curated fixtures; ignore runtime output) ===
 data/fixtures/audio/*
 !data/fixtures/audio/.gitkeep
-# Ad-hoc generated audio/transcripts anywhere outside the curated fixture dirs.
+# Ad-hoc generated audio / transcripts / Meeting IR / MOMs produced at runtime.
 /data/generated/
+*.generated.json
+*.mom.md
+# Recorded/normalized audio produced by the media stage (no audio is committed for v0).
+*.wav
+*.m4a
+*.mp3
+*.flac
 
 # === Editors / OS ===
 .DS_Store

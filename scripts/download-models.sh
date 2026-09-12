@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-MODEL="${NOTELY_OLLAMA_MODEL:-qwen3:4b}"
+MODEL="${NOTELY_LLM_MODEL:-${NOTELY_OLLAMA_MODEL:-qwen3:1.7b}}"
 
 echo "==> Model manifests:"
 ls models/manifests/
@@ -15,8 +15,9 @@ if ! command -v ollama >/dev/null; then
   exit 1
 fi
 
-echo "==> Pulling LLM model via Ollama: $MODEL"
+echo "==> Pulling LLM (meeting understanding) via Ollama: $MODEL"
 ollama pull "$MODEL"
 
-echo "==> Done. Weights are stored by Ollama (e.g. ~/.ollama/models), not in this repo."
-echo "    ASR (Whisper) integration is not implemented yet; no ASR model is pulled."
+echo "==> Done. LLM weights are stored by Ollama (e.g. ~/.ollama/models), not in this repo."
+echo "    ASR: Qwen3-ASR runs on a SEPARATE runtime (not Ollama). Ollama cannot serve ASR."
+echo "    Provide a local Qwen3-ASR HTTP runtime and set NOTELY_ASR_URL. See models/manifests/qwen3-asr.yaml."

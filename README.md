@@ -41,7 +41,8 @@ Flutter Desktop App
    Rust Engine
         │
         ├── media/     FFmpeg + VAD
-        ├── asr/       speech recognition (Whisper)
+        ├── asr/       speech recognition (Qwen3-ASR — separate runtime)
+        ├── preprocess/ deterministic normalization + chunking
         ├── ai/        semantic analysis (extraction / synthesis / validation)
         ├── llm/       model runtime (Ollama, …)
         ├── storage/   local persistence
@@ -122,14 +123,22 @@ Contract: [`packages/protocol`](packages/protocol/README.md) · design: [docs/ip
 ## AI / ASR pipeline
 
 ```text
-media processing → ASR → transcript processing → AI extraction
-   → AI synthesis → Meeting IR validation → rendering → storage
+AUDIO → Qwen3-ASR → Transcript → deterministic Rust chunking/cleanup
+      → small Qwen (extraction per chunk + synthesis) → Meeting IR
+      → deterministic Rust renderer → Markdown
 ```
 
-The pipeline coordinates components through **abstractions** (`AsrProvider`, `AiProvider`,
-`LlmProvider`) — never hard-wired to Whisper/Qwen/Ollama. Traditional code does the deterministic
-work (VAD, timestamps, validation, rendering); the LLM is used only where language understanding
-is required. See [docs/pipeline.md](docs/pipeline.md) and [docs/ai-engine.md](docs/ai-engine.md).
+Two Qwen models on **two runtimes**, with deterministic Rust in between:
+
+- **Qwen3-ASR** (speech recognition) runs on a **separate ASR runtime** — *not* Ollama.
+- **Qwen3 1.7B** (meeting understanding) runs on **Ollama**; configurable via `NOTELY_LLM_MODEL`.
+- **Rust** owns chunking, evidence grounding, validation, and rendering.
+
+Extraction and synthesis are **two separate LLM passes** (never a single "transcript → LLM → MOM"
+call). The pipeline coordinates components through **abstractions** (`AsrProvider`, `AiAnalyzer`,
+`LlmProvider`) — never hard-wired to a backend. Evidence is grounded deterministically in Rust and
+owners/deadlines are never invented. See [docs/pipeline.md](docs/pipeline.md) and
+[docs/ai-engine.md](docs/ai-engine.md).
 
 ## Meeting IR
 
@@ -169,28 +178,30 @@ Equivalent `make <target>` / `just <target>` recipes exist. Full guide:
 
 ### Models
 
-Weights are **never** committed. Manifests live in `models/manifests/`; fetch models into your
-runtime/cache with `./scripts/download-models.sh` (`ollama pull qwen3:4b`). See
-[models/README.md](models/README.md).
+Weights are **never** committed. Manifests live in `models/manifests/`; fetch the LLM with
+`./scripts/download-models.sh` (`ollama pull qwen3:1.7b`). Qwen3-ASR runs on a separate runtime.
+See [models/README.md](models/README.md).
 
 ## Current status
 
 **Implemented (backend):**
 - ✅ Single Rust engine, internally modular, runnable (`cargo run -p notely-engine`) with graceful shutdown
-- ✅ Domain model + structured **Meeting IR** (serde)
-- ✅ AI layer: schema-constrained extraction → deterministic synthesis → validation
-- ✅ LLM runtime abstraction with an **Ollama** provider (default model `qwen3:4b`)
+- ✅ Domain model + structured **Meeting IR** with evidence/provenance (serde)
+- ✅ **Deterministic transcript preprocessing + chunking** (`preprocess/`) — segment-aware, with context
+- ✅ **Two-pass AI**: per-chunk extraction → synthesis → validation; deterministic evidence grounding; owners/deadlines never invented
+- ✅ LLM runtime abstraction over **Ollama**, default **`qwen3:1.7b`** (configurable via `NOTELY_LLM_MODEL`)
+- ✅ **Qwen3-ASR** provider on a **separate runtime** (HTTP), Whisper optional — behind the `AsrProvider` trait
 - ✅ SQLite storage (embedded, no server) behind repository traits
-- ✅ Deterministic Markdown/JSON renderers (no LLM used to format)
-- ✅ Pipeline orchestrator with jobs, cancellation, and progress events
+- ✅ Deterministic Markdown (table for action items) / JSON renderers — no LLM used to format
+- ✅ Orchestrator with jobs, cancellation, and **granular per-stage progress events**
 - ✅ Versioned IPC server over a transport-isolated TCP JSON socket
-- ✅ **End-to-end proven:** transcript → Ollama/Qwen → Meeting IR → Markdown (`--ignored` smoke test)
+- ✅ **End-to-end proven** against real local **Qwen3 1.7B**: transcript → chunking → extraction → synthesis → Meeting IR → Markdown (`--ignored` smoke test)
 - ✅ `cargo fmt/clippy/test` green (unit + integration tests)
 
-**Scaffolded (clean boundary, not wired):**
-- ⏳ ASR (Whisper) — trait + fixture provider exist; real transcription returns "not implemented"
-- ⏳ Media (FFmpeg) audio extraction is implemented but the audio→transcript path isn't end-to-end
-- ⏳ Flutter UI and the Dart IPC client (this task was backend-only)
+**Scaffolded (clean boundary, not run end-to-end here):**
+- ⏳ `audio → media → ASR` head: FFmpeg normalization + Qwen3-ASR HTTP client implemented; running it live needs FFmpeg installed and a reachable Qwen3-ASR runtime (transcript input is the supported path)
+- ⏳ HTML renderer (Markdown + JSON done); a distinct verified-mode LLM pass
+- ⏳ Flutter UI and the Dart IPC client (backend-only tasks so far)
 
 See per-area status in [docs/](docs/) (`pipeline.md`, `ai-engine.md`, `ipc.md`).
 

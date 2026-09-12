@@ -28,6 +28,7 @@ fn transcript_round_trips_and_optional_fields_omitted() {
             end: 1.0,
             text: "hi".into(),
             language: None,
+            confidence: None,
         }],
     };
     let json = serde_json::to_string(&t).unwrap();
@@ -45,32 +46,34 @@ fn meeting_ir_round_trips_with_all_sections() {
         topics: vec![Topic {
             title: "Scope".into(),
             summary: Some("v0".into()),
-            evidence: vec![],
+            ..Default::default()
         }],
         decisions: vec![Decision {
             decision: "Ship transcript path first".into(),
             context: Some("core bet".into()),
             evidence: vec![Evidence {
                 quote: "that's the whole bet".into(),
+                chunk_id: Some("chunk-0".into()),
+                start: Some(12.0),
                 ..Default::default()
             }],
+            confidence: Some(0.8),
         }],
         action_items: vec![ActionItem {
             description: "Wire health check".into(),
             owner: Some("S2".into()),
             deadline: Some("Friday".into()),
             status: ActionStatus::InProgress,
-            evidence: vec![],
+            ..Default::default()
         }],
         open_questions: vec![OpenQuestion {
             question: "Which Qwen size?".into(),
-            context: None,
-            evidence: vec![],
+            ..Default::default()
         }],
         risks: vec![Risk {
             description: "Ollama may be down".into(),
             severity: Some("medium".into()),
-            evidence: vec![],
+            ..Default::default()
         }],
     };
 

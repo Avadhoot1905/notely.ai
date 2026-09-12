@@ -72,9 +72,12 @@ pub enum Request {
 pub struct HealthInfo {
     pub protocol_version: u32,
     pub engine_ok: bool,
-    /// Whether the LLM runtime responded to a health check.
+    /// Whether the LLM runtime (Ollama) responded to a health check.
     pub llm_ok: bool,
+    /// The configured LLM model tag (e.g. "qwen3:1.7b").
     pub model: String,
+    /// The configured ASR provider (e.g. "qwen3-asr"), which runs on a separate runtime.
+    pub asr_provider: String,
 }
 
 /// Immediate responses to a [`Request`]. Long work continues via [`super::events::Event`].

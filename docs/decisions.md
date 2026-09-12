@@ -3,6 +3,32 @@
 A lightweight log of the major v0 architectural decisions. Newest first. Keep entries short:
 what we decided, and why.
 
+## D-0016 — Deterministic evidence grounding in Rust
+Small models unreliably copy quotes, so Rust matches each extracted item back to its source
+transcript segment and attaches the real quote + timestamps + speaker + `chunk_id`
+(`ai/extraction.rs`). Owners/deadlines the synthesis model can't support from findings or the
+transcript are dropped to null. Provenance and anti-invention are Rust's job, not the model's.
+
+## D-0015 — Two separate LLM passes (extraction → synthesis)
+Extraction runs once per chunk → `ChunkFindings`; synthesis consolidates them → Meeting IR. Never
+`transcript → LLM → MOM`. Buys long-meeting scalability, provenance, debuggability, and lets
+chunking change independently of prompts. See [ai-engine.md](ai-engine.md).
+
+## D-0014 — Deterministic transcript preprocessing/chunking is Rust, not the LLM
+Normalization (whitespace/order/timestamps) and segment-aware chunking live in `preprocess/`. The
+raw ASR transcript is preserved separately from the normalized copy. The LLM never does mechanical
+chunking.
+
+## D-0013 — ASR is a SEPARATE runtime from the LLM
+Qwen3-ASR is the default ASR, served by its own HTTP runtime (`asr/qwen3_asr.rs`) — NOT Ollama,
+which can't do speech-to-text. The LLM (Qwen3 1.7B) stays on Ollama. Whisper is an optional
+provider behind the same `AsrProvider` trait. Model and runtime are configured independently.
+
+## D-0012 — Default LLM is Qwen3 1.7B (down from 4B)
+The small `qwen3:1.7b` is the v0 default for meeting understanding — fast on a dev laptop and good
+enough with the two-pass + deterministic-grounding design. Configurable via `NOTELY_LLM_MODEL`
+(`qwen3:0.6b`/`qwen3:4b`) without touching the pipeline.
+
 ## D-0011 — IPC transport: newline-delimited JSON over loopback TCP
 The v0 transport is line-framed JSON on `127.0.0.1:8765`, isolated in `engine/src/ipc/server.rs`.
 Simple, cross-platform, trivially testable, and swappable later. Not an HTTP/web server — just

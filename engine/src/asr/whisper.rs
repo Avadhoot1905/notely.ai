@@ -1,10 +1,9 @@
-//! Whisper-based [`AsrProvider`] — the intended v0 default.
+//! Whisper-based [`AsrProvider`] — an OPTIONAL provider (not the v0 default; Qwen3-ASR is).
 //!
 //! This is a real boundary with NO real implementation yet: `transcribe` returns
 //! [`AsrError::NotImplemented`] rather than pretending. Integrating whisper.cpp (loading the model
 //! from `models/manifests/whisper.yaml` and mapping its segments to [`Transcript`]) is future work.
-//! Until then, audio→transcript is unavailable; the transcript-import path (see the pipeline) is
-//! the supported flow, and tests use the fixture provider.
+//! It is kept behind the same trait so it can be selected via `NOTELY_ASR_PROVIDER=whisper` later.
 
 use async_trait::async_trait;
 

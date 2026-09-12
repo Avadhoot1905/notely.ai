@@ -53,8 +53,24 @@ supports them.
 
 ## Evidence / provenance
 
-`Evidence { start, end }` (seconds) is the unit of traceability. Every extracted decision and
-action item can point back into the transcript, which is what makes generated claims checkable.
+`Evidence { quote, speaker_id, start, end, chunk_id }` is the unit of traceability. Every extracted
+decision, action item, topic, question, and risk can point back into the transcript — the `quote`
+and timestamps for a human, the `chunk_id` (`source_chunk`) for debugging. This is what makes
+generated claims checkable.
+
+Evidence is attached **deterministically in Rust** (`ai/extraction.rs`), by matching each item to
+its source transcript segment — not by trusting a small model to copy quotes. Items also carry an
+optional `confidence`.
+
+## ChunkFindings (intermediate representation)
+
+Before the IR, extraction produces `ChunkFindings` — one per transcript chunk (`ai/findings.rs`).
+This intermediate layer is what lets long meetings, provenance, and debugging stay tractable: each
+finding is traceable to its chunk before synthesis consolidates them into the IR.
+
+```text
+Transcript → chunks → [ChunkFindings per chunk] → synthesis → MeetingIr
+```
 
 The IR — not the Markdown — is the thing worth getting right. If the IR is good, the MOM and many
 future features follow.

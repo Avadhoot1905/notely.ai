@@ -1,11 +1,12 @@
-//! Drives a meeting through every processing stage and emits progress events.
+//! Drives a meeting through every processing stage and emits granular progress events.
 //!
-//! The orchestrator owns the ORDER of operations and nothing else: it depends only on the
-//! abstractions (`MediaProcessor`, `AsrProvider`, `AiAnalyzer`, `Store`) — never on FFmpeg command
-//! lines or Ollama HTTP. Each module performs its own responsibility.
+//! The orchestrator owns the ORDER of operations and nothing else. It depends only on the
+//! abstractions (`MediaProcessor`, `AsrProvider`, `AiAnalyzer`, `Store`) and the deterministic
+//! `preprocess`/`renderer` helpers — never on FFmpeg command lines, ASR HTTP, or Ollama HTTP.
 //!
 //! ```text
-//! input → [media → ASR] → transcript → AI analyze → Meeting IR → validate → render → store
+//! Audio ─► media ─► ASR ─► Transcript ─► deterministic chunking ─► per-chunk extraction
+//!        ─► synthesis ─► Meeting IR ─► validation ─► deterministic renderer ─► Markdown ─► storage
 //! ```
 
 use std::path::PathBuf;
@@ -13,11 +14,13 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast::Sender as BroadcastSender;
 
-use crate::ai::{AiAnalyzer, AiError, AnalysisContext};
+use crate::ai::{validation, AiAnalyzer, AiError, AnalysisContext, ChunkFindings};
 use crate::asr::{AsrError, AsrProvider, AudioInput};
-use crate::domain::{Meeting, MeetingId, Transcript};
+use crate::config::ChunkingConfig;
+use crate::domain::{Meeting, MeetingId, MeetingIr, Transcript};
 use crate::ipc::events::Event;
 use crate::media::{ExtractOptions, MediaError, MediaProcessor};
+use crate::preprocess::{self, PreparedTranscript};
 use crate::renderer::markdown;
 use crate::storage::{StorageError, Store};
 
@@ -25,7 +28,7 @@ use super::jobs::{CancelFlag, JobId, JobRegistry, JobStage, JobStatus};
 
 /// What to process into a meeting.
 pub enum MeetingInput {
-    /// Analyze an already-available transcript (the supported v0 path).
+    /// Analyze an already-available transcript (skips media + ASR).
     Transcript {
         title: Option<String>,
         transcript: Transcript,
@@ -47,9 +50,8 @@ impl MeetingInput {
     }
 }
 
-/// Sink for progress events. A broadcast channel so any number of connected IPC clients can
-/// observe a job's progress. Sends are best-effort: `let _ = sink.send(..)` ignores "no
-/// subscribers".
+/// Sink for progress events. A broadcast channel so any number of connected IPC clients can observe
+/// a job's progress. Sends are best-effort: `let _ = sink.send(..)` ignores "no subscribers".
 pub type EventSink = BroadcastSender<Event>;
 
 #[derive(Debug, thiserror::Error)]
@@ -75,9 +77,11 @@ pub struct Orchestrator {
     store: Arc<dyn Store>,
     jobs: JobRegistry,
     data_dir: PathBuf,
+    chunking: ChunkingConfig,
 }
 
 impl Orchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         media: Arc<dyn MediaProcessor>,
         asr: Arc<dyn AsrProvider>,
@@ -85,6 +89,7 @@ impl Orchestrator {
         store: Arc<dyn Store>,
         jobs: JobRegistry,
         data_dir: PathBuf,
+        chunking: ChunkingConfig,
     ) -> Self {
         Self {
             media,
@@ -93,6 +98,7 @@ impl Orchestrator {
             store,
             jobs,
             data_dir,
+            chunking,
         }
     }
 
@@ -163,51 +169,170 @@ impl Orchestrator {
         });
         check_cancel(cancel)?;
 
-        // 2. Obtain a transcript (either provided, or via media → ASR).
-        let transcript = match input {
+        // 2. Obtain the raw transcript (either provided, or via media → ASR). Preserved as-is.
+        let raw_transcript = match input {
             MeetingInput::Transcript { transcript, .. } => transcript,
             MeetingInput::Audio { path, .. } => {
-                self.stage(job_id, JobStage::MediaProcessing);
-                let out_dir = self.data_dir.join("work").join(&job_id.0);
-                let prepared = self
-                    .media
-                    .extract_audio(&path, &out_dir, &ExtractOptions::default())
-                    .await?;
-                check_cancel(cancel)?;
-
-                self.stage(job_id, JobStage::Transcription);
-                let _ = events.send(Event::TranscriptionStarted {
-                    job_id: job_id.clone(),
-                });
-                self.asr.transcribe(&AudioInput::new(prepared.path)).await?
+                self.media_and_asr(job_id, &path, events, cancel).await?
             }
         };
-        self.store.save_transcript(&meeting.id, &transcript).await?;
+        self.store
+            .save_transcript(&meeting.id, &raw_transcript)
+            .await?;
         check_cancel(cancel)?;
 
-        // 3. AI analysis → Meeting IR (extraction + synthesis + validation happen inside).
-        self.stage(job_id, JobStage::Analysis);
-        let _ = events.send(Event::AnalysisStarted {
+        // 3. Deterministic Rust: normalize + chunk (no LLM).
+        self.stage(job_id, JobStage::Chunking);
+        let _ = events.send(Event::ChunkingStarted {
             job_id: job_id.clone(),
         });
-        let ir = self.ai.analyze(&transcript, &context).await?;
-        self.store.save_meeting_ir(&meeting.id, &ir).await?;
+        let prepared = preprocess::prepare(&raw_transcript, &self.chunking);
+        let _ = events.send(Event::ChunkingCompleted {
+            job_id: job_id.clone(),
+            chunk_count: prepared.chunks.len(),
+        });
         check_cancel(cancel)?;
 
-        // 4. Deterministic rendering → Markdown MOM (no LLM here).
+        // 4. AI: per-chunk extraction → synthesis → validation.
+        let ir = self
+            .analyze(job_id, &prepared, &context, events, cancel)
+            .await?;
+        self.store.save_meeting_ir(&meeting.id, &ir).await?;
+
+        // 5. Deterministic rendering → Markdown MOM (no LLM here).
         self.stage(job_id, JobStage::Rendering);
         let _ = events.send(Event::RenderingStarted {
             job_id: job_id.clone(),
         });
         let mom = markdown::render_with_title(&ir, &meeting.title);
+        let _ = events.send(Event::RenderingCompleted {
+            job_id: job_id.clone(),
+        });
 
-        // 5. Persist artifacts + meeting metadata (participants learned during analysis).
+        // 6. Persist artifacts + meeting metadata (participants learned during analysis).
         self.stage(job_id, JobStage::Storing);
         self.store.save_mom(&meeting.id, &mom).await?;
         meeting.participants = ir.participants.clone();
         self.store.save_meeting(&meeting).await?;
 
         Ok(meeting.id)
+    }
+
+    /// Media normalization + ASR for the audio input path.
+    async fn media_and_asr(
+        &self,
+        job_id: &JobId,
+        path: &std::path::Path,
+        events: &EventSink,
+        cancel: &CancelFlag,
+    ) -> Result<Transcript, PipelineError> {
+        self.stage(job_id, JobStage::MediaProcessing);
+        let _ = events.send(Event::MediaProcessingStarted {
+            job_id: job_id.clone(),
+        });
+        let out_dir = self.data_dir.join("work").join(&job_id.0);
+        let prepared_audio = self
+            .media
+            .extract_audio(path, &out_dir, &ExtractOptions::default())
+            .await?;
+        let _ = events.send(Event::MediaProcessingCompleted {
+            job_id: job_id.clone(),
+        });
+        check_cancel(cancel)?;
+
+        self.stage(job_id, JobStage::Transcription);
+        let _ = events.send(Event::TranscriptionStarted {
+            job_id: job_id.clone(),
+        });
+        // Our ASR providers return the full transcript at once (no sub-progress), so we emit
+        // stage-level start/complete rather than faking granular TranscriptionProgress.
+        let transcript = self
+            .asr
+            .transcribe(&AudioInput::new(prepared_audio.path))
+            .await?;
+        let _ = events.send(Event::TranscriptionCompleted {
+            job_id: job_id.clone(),
+        });
+        Ok(transcript)
+    }
+
+    /// The two-pass AI analysis with per-chunk extraction progress and validation events.
+    async fn analyze(
+        &self,
+        job_id: &JobId,
+        prepared: &PreparedTranscript,
+        context: &AnalysisContext,
+        events: &EventSink,
+        cancel: &CancelFlag,
+    ) -> Result<MeetingIr, PipelineError> {
+        let total = prepared.chunks.len();
+
+        // Empty transcript → deterministic IR, no LLM call, no invention.
+        if total == 0 {
+            let ir = MeetingIr {
+                summary: "No transcript content was available to analyze.".to_string(),
+                ..Default::default()
+            };
+            self.validate_stage(job_id, &ir, events)?;
+            return Ok(ir);
+        }
+
+        // Extraction pass (per chunk).
+        self.stage(job_id, JobStage::Extraction);
+        let _ = events.send(Event::ExtractionStarted {
+            job_id: job_id.clone(),
+            chunk_count: total,
+        });
+        let mut findings: Vec<ChunkFindings> = Vec::with_capacity(total);
+        for (i, chunk) in prepared.chunks.iter().enumerate() {
+            check_cancel(cancel)?;
+            findings.push(self.ai.extract_chunk(chunk, context).await?);
+            let _ = events.send(Event::ExtractionProgress {
+                job_id: job_id.clone(),
+                completed: i + 1,
+                total,
+            });
+        }
+        let _ = events.send(Event::ExtractionCompleted {
+            job_id: job_id.clone(),
+        });
+        check_cancel(cancel)?;
+
+        // Synthesis pass (consolidate → Meeting IR).
+        self.stage(job_id, JobStage::Synthesis);
+        let _ = events.send(Event::SynthesisStarted {
+            job_id: job_id.clone(),
+        });
+        let ir = self
+            .ai
+            .synthesize(&findings, &prepared.normalized, context)
+            .await?;
+        let _ = events.send(Event::SynthesisCompleted {
+            job_id: job_id.clone(),
+        });
+        check_cancel(cancel)?;
+
+        // Validation.
+        self.validate_stage(job_id, &ir, events)?;
+        Ok(ir)
+    }
+
+    fn validate_stage(
+        &self,
+        job_id: &JobId,
+        ir: &MeetingIr,
+        events: &EventSink,
+    ) -> Result<(), PipelineError> {
+        self.stage(job_id, JobStage::Validation);
+        let _ = events.send(Event::ValidationStarted {
+            job_id: job_id.clone(),
+        });
+        validation::validate(ir)
+            .map_err(|errs| PipelineError::Ai(AiError::Validation(errs.join("; "))))?;
+        let _ = events.send(Event::ValidationCompleted {
+            job_id: job_id.clone(),
+        });
+        Ok(())
     }
 
     fn stage(&self, job_id: &JobId, stage: JobStage) {

@@ -2,31 +2,42 @@
 
 This directory holds **model metadata only** — never model weights.
 
-## Required runtime
+## Two models, two runtimes
 
-Notely's v0 LLM runtime is **[Ollama](https://ollama.com)** (a local model server). The engine
-talks to it over HTTP through the `LlmProvider` abstraction (`engine/src/llm/ollama.rs`); the rest
-of the engine never knows Ollama exists.
+Notely uses **two Qwen models on two different runtimes** (see `docs/ai-engine.md`):
 
-- Install Ollama and ensure the service is running (`ollama serve`, or the app/brew service).
+| Model | Task | Runtime | Manifest |
+|-------|------|---------|----------|
+| **Qwen3 1.7B** | meeting understanding (extraction + synthesis) | **Ollama** | `manifests/qwen3.yaml` |
+| **Qwen3-ASR** | speech recognition | **separate ASR runtime (HTTP)** — *not* Ollama | `manifests/qwen3-asr.yaml` |
+
+**Ollama does not do speech-to-text**, so ASR is a genuinely separate runtime. Do not try to serve
+Qwen3-ASR through Ollama.
+
+## LLM runtime — Ollama
+
+- Install [Ollama](https://ollama.com) and ensure it's running (`ollama serve`, or the brew/app service).
 - Verify: `ollama --version` and `curl http://localhost:11434/api/tags`.
 
-## Selected model (v0 development)
+### Selected LLM (v0 default): `qwen3:1.7b`
 
-**`qwen3:4b`** (Qwen3, 4B params, `Q4_K_M`, ~2.5 GB) — see `manifests/qwen3.yaml`.
-
-It is the default because it fits a typical dev laptop (Apple Silicon / ~16–24 GB RAM) while
-producing usable structured Meeting IR. The engine is model-agnostic: override with the
-`NOTELY_OLLAMA_MODEL` env var (e.g. `qwen3:1.7b` for lower-resource machines).
-
-## How to install / pull it
+Qwen3 1.7B (`Q4_K_M`, ~1.4 GB) — small enough that extraction + synthesis run comfortably on a dev
+laptop. The engine is model-agnostic: override with `NOTELY_LLM_MODEL` (e.g. `qwen3:4b` or
+`qwen3:0.6b`) to benchmark without changing the pipeline.
 
 ```bash
-ollama pull qwen3:4b
+ollama pull qwen3:1.7b
 # or, using the repo scripts:
 ./scripts/download-models.sh
 ./scripts/verify-models.sh
 ```
+
+## ASR runtime — Qwen3-ASR (separate)
+
+Qwen3-ASR runs on its own local inference server exposing an HTTP endpoint; the engine reaches it
+via `Qwen3AsrProvider` (`engine/src/asr/qwen3_asr.rs`), configured with `NOTELY_ASR_URL`. No
+open-weights Qwen3-ASR is bundled — provide your own runtime. The **transcript-first** path needs
+no ASR at all. Whisper remains an optional fallback provider (`NOTELY_ASR_PROVIDER=whisper`).
 
 ## Where the model is actually stored
 

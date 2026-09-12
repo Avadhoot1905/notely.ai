@@ -22,12 +22,16 @@ pub struct Evidence {
     /// Speaker id (matching a [`Participant::id`]) who said it, if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker_id: Option<String>,
-    /// Start time in seconds within the source media, if known.
+    /// Start time in seconds within the source media, if known (`source_timestamp`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start: Option<f64>,
     /// End time in seconds within the source media, if known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<f64>,
+    /// Id of the transcript chunk this evidence came from (`source_chunk`). Set during extraction
+    /// so every extracted item can be traced back to the chunk (and thus the transcript span).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_id: Option<String>,
 }
 
 /// A discussion topic and its gist.
@@ -38,6 +42,9 @@ pub struct Topic {
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<Evidence>,
+    /// Model-reported confidence in [0,1], when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 /// A question raised but left unresolved.
@@ -48,6 +55,8 @@ pub struct OpenQuestion {
     pub context: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 /// A risk or concern surfaced during the meeting.
@@ -59,6 +68,8 @@ pub struct Risk {
     pub severity: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 /// Structured understanding of one meeting: the thing worth getting right.

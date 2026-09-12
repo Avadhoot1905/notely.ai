@@ -4,10 +4,13 @@
 
 - **Rust** (stable; `rustup`) — see `rust-toolchain.toml`. Includes `rustfmt` + `clippy`.
 - **Flutter** (stable, Dart ≥ 3.12) with desktop enabled for your OS.
-- **Ollama** — required for AI processing (the `qwen3:4b` model). Install from
-  <https://ollama.com>, then `ollama pull qwen3:4b`.
-- Optional: **FFmpeg** (audio extraction; the audio→transcript path is not wired end-to-end yet),
-  **just** (`justfile`) — otherwise use `make` or the scripts directly.
+- **Ollama** — required for AI processing (the **LLM**, default `qwen3:1.7b`). Install from
+  <https://ollama.com>, then `ollama pull qwen3:1.7b`.
+- **Qwen3-ASR runtime** — only needed for the **audio** input path (transcript input needs no ASR).
+  ASR runs on a *separate* HTTP runtime, **not** Ollama (Ollama can't do speech-to-text). See
+  `models/manifests/qwen3-asr.yaml`.
+- Optional: **FFmpeg** (audio normalization for the audio path), **just** (`justfile`) — otherwise
+  use `make` or the scripts directly.
 
 ## Configuration
 
@@ -16,9 +19,13 @@ The engine reads these environment variables (all optional; see `.env.example` a
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `NOTELY_OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
-| `NOTELY_OLLAMA_MODEL` | `qwen3:4b` | model tag to run |
-| `NOTELY_OLLAMA_TIMEOUT_SECS` | `120` | per-generation timeout |
+| `NOTELY_OLLAMA_URL` | `http://localhost:11434` | Ollama (LLM) base URL |
+| `NOTELY_LLM_MODEL` | `qwen3:1.7b` | LLM model tag (legacy alias: `NOTELY_OLLAMA_MODEL`) |
+| `NOTELY_OLLAMA_TIMEOUT_SECS` | `180` | per-generation timeout |
+| `NOTELY_ASR_PROVIDER` | `qwen3-asr` | ASR provider: `qwen3-asr` \| `whisper` \| `fixture` |
+| `NOTELY_ASR_URL` | `http://localhost:9000` | Qwen3-ASR runtime base URL (separate from Ollama) |
+| `NOTELY_ASR_MODEL` | `qwen3-asr` | ASR model id |
+| `NOTELY_ASR_TIMEOUT_SECS` | `600` | ASR request timeout |
 | `NOTELY_DATA_DIR` | OS app-data dir | SQLite DB + artifacts location (outside the repo) |
 | `NOTELY_LOG_LEVEL` | `info` | `tracing` filter |
 | `NOTELY_IPC_ADDR` | `127.0.0.1:8765` | IPC server bind address |
@@ -71,20 +78,22 @@ flutter test integration_test    # integration tests
 Model weights are **not** in the repo. Manifests live in `models/manifests/`.
 
 ```bash
-./scripts/download-models.sh   # ollama pull qwen3:4b
-./scripts/verify-models.sh     # check required models/runtime are present
+./scripts/download-models.sh   # ollama pull qwen3:1.7b
+./scripts/verify-models.sh     # check the LLM (and ASR runtime) are present
 ```
 
 ## End-to-end backend smoke test
 
-Prove the core path (transcript → Ollama/Qwen → structured Meeting IR → Markdown) with a real
-model. Requires Ollama running with `qwen3:4b`:
+Prove the two-pass AI path (transcript → deterministic chunking → Qwen3 1.7B extraction →
+synthesis → Meeting IR → Markdown) with a real model. Requires Ollama running with `qwen3:1.7b`:
 
 ```bash
 # ignored by default so the normal suite never depends on Ollama:
 cargo test -p notely-engine --test ollama_smoke -- --ignored --nocapture
 # or an interactive runner that prints the IR + MOM:
 cargo run -p notely-engine --example transcript_to_mom
+# benchmark a larger model without changing the pipeline:
+NOTELY_LLM_MODEL=qwen3:4b cargo run -p notely-engine --example transcript_to_mom
 ```
 
 ## Repo conventions

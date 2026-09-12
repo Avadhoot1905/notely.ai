@@ -59,16 +59,44 @@ Described by manifests in [`models/`](../models/README.md). **Weights are never 
 The LLM outputs the **Meeting IR** (structured data), and a deterministic renderer produces the
 MOM. This is the core design choice — see [meeting-ir.md](meeting-ir.md).
 
+## Two passes (extraction + synthesis)
+
+The AI layer runs **two deliberately separate LLM passes** over Rust-owned JSON schemas
+(`ai/schema.rs`):
+
+1. **Extraction** (`ai/extraction.rs`) — one schema-constrained call **per chunk** →
+   `ChunkFindings` (`ai/findings.rs`). Findings are kept separate from the final IR so long
+   meetings, provenance, and debugging stay tractable.
+2. **Synthesis** (`ai/synthesis.rs`) — one call consolidating all findings → `MeetingIr`
+   (dedup/merge + overall summary), followed by **deterministic reconciliation** in Rust.
+
+Splitting the passes gives scalability to long meetings, provenance, easier evaluation, and the
+ability to change chunking independently of prompts. We never collapse this into
+`transcript → LLM → MOM`.
+
+## Provenance & anti-invention (deterministic Rust)
+
+Small models are unreliable at copying quotes and don't always surface owners/deadlines, so Rust
+does the trustworthy work:
+
+- **Evidence grounding** (extraction): each finding is matched back to its source transcript
+  segment; Rust attaches the real quote + precise timestamps + speaker + `chunk_id`. Quotes the
+  model *did* copy are kept and back-stamped.
+- **Owner/deadline guard** (synthesis reconciliation): an owner/deadline is kept only if a source
+  finding stated it or it appears verbatim in the transcript — otherwise it is dropped to `null`.
+  The model may **not** invent people or dates.
+- **Participant backfill:** participants come from the transcript speakers, not the model.
+- **Controlled repair:** a parse failure triggers one stricter retry before erroring; malformed
+  output is never accepted as a valid IR.
+
 ## Status (v0)
 
-- **Implemented:** `AiAnalyzer` → `LlmAiEngine` runs a single **schema-constrained** LLM call
-  (`ai/extraction.rs` builds the IR JSON Schema and passes it as Ollama's `format`), then
-  deterministic **synthesis** (`ai/synthesis.rs`, e.g. backfilling participants) and
-  **validation** (`ai/validation.rs`). Malformed model output is rejected with a useful error —
-  never silently accepted. `LlmProvider` → `OllamaProvider` performs the HTTP generation. This is
-  exercised end-to-end against `qwen3:4b` in `engine/tests/ollama_smoke.rs`.
-- **Scaffolded / planned:** a distinct verified-mode critique pass, multi-call extraction for very
-  long meetings, and additional runtimes behind `LlmProvider` (llama.cpp, etc.).
+- **Implemented & proven end-to-end** against real local **Qwen3 1.7B** (`ollama_smoke.rs`):
+  per-chunk extraction → synthesis → validation → grounded, provenance-linked Meeting IR.
+- **Model is configurable** (`NOTELY_LLM_MODEL`) — benchmark `qwen3:0.6b` / `qwen3:4b` without
+  touching the pipeline.
+- **Scaffolded / planned:** a distinct verified-mode critique pass and additional runtimes behind
+  `LlmProvider` (llama.cpp, …).
 
-The extraction schema is owned by Rust (`ai/extraction.rs::ir_json_schema`) and mirrors the domain
-`MeetingIr` — the model fills it in, it does not define it.
+The schemas are owned by Rust (`ai/schema.rs`) and mirror the domain types — the model fills them
+in, it does not define them.
