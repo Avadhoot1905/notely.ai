@@ -10,10 +10,10 @@ import 'package:notely_desktop/app/app.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('app boots to the meetings screen', (tester) async {
+  testWidgets('app boots to the Stash picker', (tester) async {
     await tester.pumpWidget(const NotelyApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Notely — Meetings'), findsOneWidget);
+    expect(find.text('Open Stash'), findsOneWidget);
   });
 }

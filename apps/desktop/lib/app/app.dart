@@ -1,24 +1,79 @@
-// Root application widget: wires up theming and top-level navigation.
+// Root application widget: theme, controller lifecycle, and the top-level gate between the
+// Stash picker and the workspace.
 //
-// `app/` holds app-wide concerns (root widget, theme, routing, shared shell). Individual
-// screens live under `features/`.
+// `app/` holds app-wide concerns (root widget, theme, shared scope). Screens live under
+// `features/`. The app talks to the Rust engine only through `lib/ipc` — none of which is
+// wired up yet; this is an interactive frontend mockup backed by in-memory mock state.
 
 import 'package:flutter/material.dart';
 
-import '../features/meetings/meeting_list_page.dart';
+import '../features/editor/editor_state.dart';
+import '../features/explorer/explorer_state.dart';
+import '../features/listening/listening_state.dart';
+import '../features/stash/stash_picker.dart';
+import '../features/stash/stash_state.dart';
+import '../features/workspace/workspace_shell.dart';
+import 'app_scope.dart';
+import 'theme.dart';
 
-class NotelyApp extends StatelessWidget {
+class NotelyApp extends StatefulWidget {
   const NotelyApp({super.key});
+
+  @override
+  State<NotelyApp> createState() => _NotelyAppState();
+}
+
+class _NotelyAppState extends State<NotelyApp> {
+  late final StashController _stash = StashController();
+  late final ExplorerController _explorer = ExplorerController();
+  late final EditorController _editor = EditorController();
+  late final ListeningController _listening = ListeningController();
+
+  @override
+  void dispose() {
+    _stash.dispose();
+    _explorer.dispose();
+    _editor.dispose();
+    _listening.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Notely',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF3A6EA5)),
-        useMaterial3: true,
+      debugShowCheckedModeBanner: false,
+      theme: buildNotelyTheme(),
+      home: AppScope(
+        stash: _stash,
+        explorer: _explorer,
+        editor: _editor,
+        listening: _listening,
+        child: const _AppGate(),
       ),
-      home: const MeetingListPage(),
+    );
+  }
+}
+
+/// Shows the workspace with the Stash picker layered above it until a stash is open.
+class _AppGate extends StatelessWidget {
+  const _AppGate();
+
+  @override
+  Widget build(BuildContext context) {
+    final stash = AppScope.of(context).stash;
+    return AnimatedBuilder(
+      animation: stash,
+      builder: (context, _) {
+        return Stack(
+          children: [
+            // The workspace is always mounted so it reads as "subdued behind the modal",
+            // matching the Obsidian open-vault feel. It's inert until a stash is open.
+            const WorkspaceShell(),
+            if (!stash.isOpen) const StashPicker(),
+          ],
+        );
+      },
     );
   }
 }
