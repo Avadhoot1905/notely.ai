@@ -68,7 +68,7 @@ class _NotelyAppState extends State<NotelyApp> {
     return AnimatedBuilder(
       animation: _theme,
       builder: (context, _) => MaterialApp(
-        title: 'Notely',
+        title: 'notely.ai',
         debugShowCheckedModeBanner: false,
         theme: buildNotelyTheme(Brightness.light),
         darkTheme: buildNotelyTheme(Brightness.dark),
@@ -86,7 +86,12 @@ class _NotelyAppState extends State<NotelyApp> {
   }
 }
 
-/// Shows the workspace with the Stash picker layered above it until a stash is open.
+/// Gates between the Stash picker and the workspace.
+///
+/// On first launch (no stash open) ONLY the picker is shown, over a plain background — the
+/// workspace isn't mounted behind it, so the launch modal is the sole thing on screen. When a
+/// stash is already open and the user is *switching*, the workspace stays mounted behind the
+/// modal (subdued), matching the Obsidian open-vault feel.
 class _AppGate extends StatelessWidget {
   const _AppGate();
 
@@ -96,14 +101,14 @@ class _AppGate extends StatelessWidget {
     return AnimatedBuilder(
       animation: stash,
       builder: (context, _) {
+        final bg = context.tokens.background;
+        // Avoid any flash while the persisted stash is being restored.
+        if (stash.isRestoring) return ColoredBox(color: bg);
         return Stack(
+          fit: StackFit.expand,
           children: [
-            // The workspace is always mounted so it reads as "subdued behind the modal",
-            // matching the Obsidian open-vault feel. It's inert until a stash is open.
-            const WorkspaceShell(),
-            // Shown when no stash is open, or when switching over the current one. Hidden
-            // during the initial restore to avoid a flash.
-            if (stash.showPicker && !stash.isRestoring) const StashPicker(),
+            if (stash.isOpen) const WorkspaceShell() else ColoredBox(color: bg),
+            if (stash.showPicker) const StashPicker(),
           ],
         );
       },

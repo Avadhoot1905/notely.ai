@@ -6,13 +6,18 @@
 // cancelled). Persistence stores only name + path — the filesystem stays authoritative.
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
+import '../../services/filesystem/file_system_service.dart';
 import '../../services/stash/stash_store.dart';
 
 class StashController extends ChangeNotifier {
-  StashController({StashStore? store}) : _store = store ?? StashStore();
+  StashController({StashStore? store, FileSystemService? fs})
+    : _store = store ?? StashStore(),
+      _fs = fs ?? const FileSystemService();
 
   final StashStore _store;
+  final FileSystemService _fs;
 
   static const int _maxRecents = 8;
 
@@ -38,17 +43,14 @@ class StashController extends ChangeNotifier {
   /// The picker can be dismissed (closed) only when there's an open stash to return to.
   bool get canDismissPicker => isOpen;
 
-  /// Attempt to restore the previously opened Stash + recents. Called once at startup.
+  /// Load the list of recent stashes at startup. Deliberately does NOT auto-open the last
+  /// stash — the launch screen is always the picker, which lists these recents so the user
+  /// chooses which stash to enter (or creates/opens a new one).
   Future<void> restore() async {
     try {
       _recents = await _store.loadRecents();
-      final config = await _store.load();
-      if (config != null) {
-        _name = config.name;
-        _path = config.path;
-      }
     } catch (_) {
-      // Ignore corrupt/unavailable prefs; user will re-pick.
+      // Ignore corrupt/unavailable prefs; the picker still shows.
     } finally {
       _restoring = false;
       notifyListeners();
@@ -82,6 +84,35 @@ class StashController extends ChangeNotifier {
     if (!_pickerRequested) return;
     _pickerRequested = false;
     notifyListeners();
+  }
+
+  /// Create a new stash folder named [name] under [parentPath] and open it. Returns its path,
+  /// or null on failure. If the folder already exists it is opened as-is.
+  Future<String?> createStash({
+    required String parentPath,
+    required String name,
+  }) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return null;
+    final path = p.join(parentPath, trimmed);
+    try {
+      if (!await _fs.exists(path)) {
+        await _fs.createFolder(parentPath, trimmed);
+      }
+      await open(name: trimmed, path: path);
+      return path;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Remove a stash from the recents list (does not touch the folder on disk).
+  Future<void> removeRecent(String path) async {
+    _recents = _recents.where((c) => c.path != path).toList();
+    notifyListeners();
+    try {
+      await _store.saveRecents(_recents);
+    } catch (_) {}
   }
 
   List<StashConfig> _mergeRecent(StashConfig config) {

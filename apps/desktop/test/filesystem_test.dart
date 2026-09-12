@@ -80,21 +80,23 @@ void main() {
     editor.dispose();
   });
 
-  test('StashStore round-trips and StashController restores', () async {
+  test('restore loads recents but does NOT auto-open a stash', () async {
     final store = StashStore();
-    await store.save(StashConfig(name: 'Work', path: tempRoot.path));
+    await store.saveRecents([StashConfig(name: 'Work', path: tempRoot.path)]);
 
     final controller = StashController(store: store);
     await controller.restore();
-    expect(controller.isOpen, isTrue);
-    expect(controller.name, 'Work');
-    expect(controller.path, tempRoot.path);
 
-    // Opening records the stash in recents and persists it as current.
-    await controller.open(name: 'Work', path: tempRoot.path);
+    // Launch screen is always the picker — no stash is auto-opened...
+    expect(controller.isOpen, isFalse);
+    expect(controller.showPicker, isTrue);
+    // ...but previous stashes are available to choose from.
     expect(controller.recents.map((c) => c.path), contains(tempRoot.path));
-    final reloaded = await store.load();
-    expect(reloaded?.path, tempRoot.path);
+
+    // Choosing one enters the workspace.
+    await controller.open(name: 'Work', path: tempRoot.path);
+    expect(controller.isOpen, isTrue);
+    expect(controller.showPicker, isFalse);
   });
 
   test(

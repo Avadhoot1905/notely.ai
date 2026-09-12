@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "ai.notely" "\0"
-            VALUE "FileDescription", "notely_desktop" "\0"
+            VALUE "FileDescription", "notely.ai" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "notely_desktop" "\0"
+            VALUE "InternalName", "notely.ai" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 ai.notely. All rights reserved." "\0"
-            VALUE "OriginalFilename", "notely_desktop.exe" "\0"
-            VALUE "ProductName", "notely_desktop" "\0"
+            VALUE "OriginalFilename", "notely.ai.exe" "\0"
+            VALUE "ProductName", "notely.ai" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -26,9 +26,10 @@ void main() {
     await tester.pumpWidget(const NotelyApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Open a Stash'), findsOneWidget);
-    expect(find.text('Choose Folder'), findsOneWidget);
-    expect(find.text('Open Stash'), findsOneWidget);
+    // The two-pane launch modal: identity + create/open actions.
+    expect(find.text('Create new Stash'), findsOneWidget);
+    expect(find.text('Open folder as Stash'), findsOneWidget);
+    expect(find.text('YOUR STASHES'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -41,7 +42,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Real screen renders under the light theme with no exceptions/overflow.
-    expect(find.text('Open a Stash'), findsOneWidget);
+    expect(find.text('Create new Stash'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     final MaterialApp app = tester.widget(find.byType(MaterialApp));

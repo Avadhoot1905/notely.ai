@@ -64,8 +64,7 @@ class _StashSwitcherState extends State<StashSwitcher> {
   bool _hover = false;
 
   Future<void> _openMenu() async {
-    final scope = AppScope.of(context);
-    final stash = scope.stash;
+    final stash = AppScope.of(context).stash;
     final t = context.tokens;
 
     final box = context.findRenderObject() as RenderBox;
@@ -75,7 +74,7 @@ class _StashSwitcherState extends State<StashSwitcher> {
       Offset.zero & overlay.size,
     );
 
-    // -1 = open another, -2 = reveal current; >=0 = recents index.
+    // -1 = make a new stash (opens the modal); >=0 = index into the older stashes.
     final others = stash.recents
         .where((c) => c.path != stash.path)
         .toList(growable: false);
@@ -85,7 +84,7 @@ class _StashSwitcherState extends State<StashSwitcher> {
       position: rect,
       color: t.raised,
       elevation: 10,
-      constraints: const BoxConstraints(minWidth: 232),
+      constraints: const BoxConstraints(minWidth: 240),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(NotelyDims.radius),
         side: BorderSide(color: t.borderStrong),
@@ -93,17 +92,13 @@ class _StashSwitcherState extends State<StashSwitcher> {
       items: [
         for (var i = 0; i < others.length; i++) _recentItem(t, i, others[i]),
         if (others.isNotEmpty) PopupMenuDivider(height: 9, color: t.border),
-        _actionItem(t, -1, Icons.swap_horiz, 'Open another Stash…'),
-        if (stash.path != null)
-          _actionItem(t, -2, Icons.folder_open_outlined, 'Reveal in Finder'),
+        _actionItem(t, -1, Icons.add, 'Make a new stash', accent: true),
       ],
     );
     if (selected == null || !mounted) return;
 
     if (selected == -1) {
       stash.requestPicker();
-    } else if (selected == -2) {
-      if (stash.path != null) await scope.explorer.reveal(stash.path!);
     } else {
       final c = others[selected];
       await stash.open(name: c.name, path: c.path);
@@ -152,17 +147,25 @@ class _StashSwitcherState extends State<StashSwitcher> {
     NotelyTokens t,
     int value,
     IconData icon,
-    String label,
-  ) {
+    String label, {
+    bool accent = false,
+  }) {
+    final color = accent ? t.accent : t.textSecondary;
     return PopupMenuItem<int>(
       value: value,
-      height: 34,
+      height: 36,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
-          Icon(icon, size: 14, color: t.textSecondary),
+          Icon(icon, size: 15, color: color),
           const SizedBox(width: 10),
-          Text(label, style: NotelyType.row.copyWith(color: t.textPrimary)),
+          Text(
+            label,
+            style: NotelyType.row.copyWith(
+              color: accent ? t.accent : t.textPrimary,
+              fontWeight: accent ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
         ],
       ),
     );
