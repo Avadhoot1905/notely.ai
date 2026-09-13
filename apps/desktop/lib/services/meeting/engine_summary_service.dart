@@ -52,19 +52,31 @@ class EngineSummaryService implements SummaryService {
   }
 
   /// Submit the transcript, then await the job's terminal event, and return the meeting id.
+  ///
+  /// The engine persists the transcript (the source of truth) BEFORE any AI runs, so a job failure
+  /// or timeout means the capture is safe but enrichment is deferred — surfaced as a
+  /// [DeferredProcessingException] carrying the persisted meeting id (for a later, dedup-safe
+  /// retry), never as data loss.
   Future<String> _runPipeline(String? title, ipc.Transcript transcript) async {
     final done = Completer<String>();
+    // Captured as soon as the engine persists the meeting; available even if enrichment then fails.
+    String? meetingId;
 
-    // Subscribe BEFORE submitting so we can't miss the terminal event.
+    // Subscribe BEFORE submitting so we can't miss an event.
     final sub = client.events().listen((event) {
       if (done.isCompleted) return;
       switch (event.type) {
+        case ipc.EngineEventType.processingStarted:
+          meetingId = event.meetingId ?? meetingId;
         case ipc.EngineEventType.jobCompleted:
-          final meetingId = event.meetingId;
-          if (meetingId != null) done.complete(meetingId);
+          final id = event.meetingId ?? meetingId;
+          if (id != null) done.complete(id);
         case ipc.EngineEventType.jobFailed:
           done.completeError(
-            ipc.EngineError(event.message ?? 'processing failed'),
+            DeferredProcessingException(
+              meetingId: meetingId,
+              reason: event.message ?? 'processing failed',
+            ),
           );
         default:
           break;
@@ -75,12 +87,12 @@ class EngineSummaryService implements SummaryService {
       final jobId = await client.processMeeting(
         ipc.TranscriptInput(title: title, transcript: transcript),
       );
-      // Guard against events for other jobs completing our completer: re-check job id.
-      // (In v0 there is a single in-flight job per session, but stay correct regardless.)
       return await done.future.timeout(
         timeout,
-        onTimeout: () =>
-            throw TimeoutException('engine did not finish job $jobId', timeout),
+        onTimeout: () => throw DeferredProcessingException(
+          meetingId: meetingId,
+          reason: 'engine did not finish job $jobId in time',
+        ),
       );
     } finally {
       await sub.cancel();

@@ -29,9 +29,13 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
+use std::collections::HashMap;
+
 use crate::ai::{AiAnalyzer, AnalysisContext, LlmAiEngine};
 use crate::config::Config;
-use crate::domain::{Meeting, MeetingId, MeetingIr, Transcript};
+use crate::domain::{
+    Meeting, MeetingId, MeetingIr, MeetingSummary, ProcessingState, ProcessingStatus, Transcript,
+};
 use crate::ipc::events::Event;
 use crate::ipc::protocol::{HealthInfo, ProcessInput, Request, Response, PROTOCOL_VERSION};
 use crate::llm::{LlmProvider, OllamaProvider};
@@ -141,6 +145,8 @@ impl Engine {
                 question,
                 vault_path,
             } => self.ask_vault(&question, &vault_path).await,
+            Request::ListMeetings => self.list_meetings().await,
+            Request::ReprocessMeeting { meeting_id } => self.start_reprocessing(meeting_id),
         }
     }
 
@@ -182,6 +188,86 @@ impl Engine {
         });
 
         Response::JobAccepted { job_id }
+    }
+
+    /// Retry AI enrichment for an existing meeting; return the job id immediately. The source
+    /// transcript is already persisted, so this never re-captures and never creates a new meeting.
+    fn start_reprocessing(&self, meeting_id: MeetingId) -> Response {
+        let (job_id, cancel) = self.jobs.create();
+        let _ = self.events.send(Event::JobCreated {
+            job_id: job_id.clone(),
+        });
+
+        let orchestrator = self.orchestrator.clone();
+        let events = self.events.clone();
+        let job = job_id.clone();
+        tokio::spawn(async move {
+            let _ = orchestrator
+                .reprocess(&job, &meeting_id, &events, &cancel)
+                .await;
+        });
+
+        Response::JobAccepted { job_id }
+    }
+
+    /// List captured meetings with their processing status (newest first). Meetings with no stored
+    /// status predate the reliability layer and are treated as already enriched by the UI.
+    async fn list_meetings(&self) -> Response {
+        let meetings = match self.store.list_meetings().await {
+            Ok(m) => m,
+            Err(e) => {
+                return Response::Error {
+                    message: e.to_string(),
+                }
+            }
+        };
+        let statuses: HashMap<String, ProcessingStatus> = self
+            .store
+            .list_processing_statuses()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, s)| (id.0, s))
+            .collect();
+        let summaries = meetings
+            .into_iter()
+            .map(|m| {
+                let status = statuses.get(&m.id.0).cloned();
+                MeetingSummary { meeting: m, status }
+            })
+            .collect();
+        Response::MeetingList(summaries)
+    }
+
+    /// Startup recovery: any capture left in `Processing` (interrupted by a crash/exit) is marked
+    /// `Deferred` so it surfaces as retryable rather than appearing stuck or lost. Idempotent — it
+    /// only touches `Processing` rows and never creates or duplicates a capture. Returns the count.
+    pub async fn recover_interrupted(&self) -> usize {
+        let statuses = match self.store.list_processing_statuses().await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("recovery: could not list processing statuses: {e}");
+                return 0;
+            }
+        };
+        let mut recovered = 0;
+        for (id, status) in statuses {
+            if status.state == ProcessingState::Processing {
+                let deferred = ProcessingStatus::deferred("processing was interrupted; will retry");
+                if self
+                    .store
+                    .save_processing_status(&id, &deferred)
+                    .await
+                    .is_ok()
+                {
+                    recovered += 1;
+                }
+            }
+        }
+        if recovered > 0 {
+            tracing::info!("recovery: {recovered} interrupted capture(s) marked deferred");
+        }
+        recovered
     }
 
     async fn get_meeting(&self, id: &MeetingId) -> Response {
@@ -290,6 +376,12 @@ impl Engine {
     pub fn config(&self) -> &Config {
         &self.config
     }
+
+    /// The persistence layer. Exposed for callers/tests that need to seed or inspect stored state
+    /// directly (the IPC surface remains the app's only path).
+    pub fn store(&self) -> Arc<dyn Store> {
+        self.store.clone()
+    }
 }
 
 /// Boot the engine and serve IPC until a shutdown signal (Ctrl-C) arrives.
@@ -309,6 +401,10 @@ pub async fn run() -> anyhow::Result<()> {
     );
 
     let engine = Arc::new(Engine::new(config)?);
+
+    // Recover any capture interrupted mid-enrichment by a previous crash/exit: the source is safe,
+    // so we mark it deferred (retryable) rather than leaving it stuck in "processing".
+    engine.recover_interrupted().await;
 
     // Best-effort runtime probe (non-fatal): the app can still browse stored meetings offline.
     match engine.llm.health().await {

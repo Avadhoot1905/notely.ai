@@ -15,6 +15,7 @@ import '../../app/theme.dart';
 import '../../ipc/engine_client.dart';
 import '../ask/ask_button.dart';
 import '../ask/ask_panel.dart';
+import '../inbox/inbox_panel.dart';
 import '../editor/editor_state.dart';
 import '../editor/markdown_editor.dart';
 import '../explorer/explorer_state.dart';
@@ -51,18 +52,24 @@ class WorkspaceShell extends StatelessWidget {
                         animation: Listenable.merge([
                           scope.listening,
                           scope.ask,
+                          scope.inbox,
                         ]),
                         builder: (context, _) {
-                          // Ask takes the right dock; otherwise the live transcript uses it.
+                          // Right dock precedence: Ask → Inbox → live transcript. Ask and Inbox
+                          // are made mutually exclusive by their toggles, so this only picks a
+                          // winner in edge cases.
                           final askOpen = scope.ask.isOpen;
+                          final inboxOpen = scope.inbox.isOpen;
                           final showTranscript = scope.listening.showTranscript;
-                          final showRight = askOpen || showTranscript;
+                          final showRight =
+                              askOpen || inboxOpen || showTranscript;
+                          final wideDock = askOpen || inboxOpen;
                           return LayoutBuilder(
                             builder: (context, constraints) {
                               // Shrink the right panel toward its minimum on narrow windows so
                               // the editor stays usable.
                               final available = constraints.maxWidth;
-                              final panelW = askOpen
+                              final panelW = wideDock
                                   ? (available < 820
                                         ? NotelyDims.askMinWidth
                                         : NotelyDims.askWidth)
@@ -83,6 +90,8 @@ class WorkspaceShell extends StatelessWidget {
                                         child: showRight
                                             ? (askOpen
                                                   ? const AskPanel()
+                                                  : inboxOpen
+                                                  ? const InboxPanel()
                                                   : const TranscriptPanel())
                                             : null,
                                       ),
@@ -148,12 +157,18 @@ class _ErrorListenerState extends State<_ErrorListener> {
   }
 
   void _check() {
-    final message =
+    // Errors (danger-styled) take precedence over calm notices (e.g. "saved, AI deferred").
+    final error =
         _explorer?.error ?? _editor?.error ?? _listening?.summariseError;
+    final message = error ?? _listening?.notice;
     if (message == null) return;
+    final isError = error != null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final t = context.tokens;
+      final borderColor = isError
+          ? t.danger.withValues(alpha: 0.6)
+          : t.accent.withValues(alpha: 0.6);
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
         ..showSnackBar(
@@ -166,7 +181,7 @@ class _ErrorListenerState extends State<_ErrorListener> {
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(NotelyDims.radius),
-              side: BorderSide(color: t.danger.withValues(alpha: 0.6)),
+              side: BorderSide(color: borderColor),
             ),
             width: 420,
             duration: const Duration(seconds: 4),
@@ -175,6 +190,7 @@ class _ErrorListenerState extends State<_ErrorListener> {
       _explorer?.clearError();
       _editor?.clearError();
       _listening?.clearSummariseError();
+      _listening?.clearNotice();
     });
   }
 
@@ -468,6 +484,11 @@ class _SidebarState extends State<_Sidebar> {
                   'Search',
                   () => _toggleSearch(explorer),
                 ),
+                _iconBtn(t, Icons.inbox_outlined, 'Inbox', () {
+                  // Ask and Inbox share the right dock; opening one closes the other.
+                  scope.ask.close();
+                  scope.inbox.toggle();
+                }),
                 _iconBtn(t, Icons.note_add_outlined, 'New note', _newFile),
                 _iconBtn(
                   t,

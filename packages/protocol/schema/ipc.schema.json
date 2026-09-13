@@ -3,7 +3,7 @@
   "$id": "https://notely.ai/schema/ipc.schema.json",
   "title": "Notely IPC protocol",
   "description": "Canonical, language-neutral schema for the Flutter <-> Rust IPC contract. Mirrored by engine/src/ipc (the source of truth) and apps/desktop/lib/ipc. See packages/protocol/README.md. Transport: newline-delimited JSON over a loopback TCP socket (default 127.0.0.1:8765). Requests are wrapped in a RequestEnvelope { protocol_version, request_id, ...Request }; responses in a ResponseEnvelope { protocol_version, request_id, ...Response }; events in an EventEnvelope { protocol_version, event: Event }.",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "definitions": {
     "ProcessInput": {
       "description": "What to process into a meeting. Tagged by `kind`.",
@@ -23,7 +23,9 @@
         { "properties": { "type": { "const": "GetTranscript" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "GetMom" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "Search" }, "params": { "properties": { "query": { "type": "string" }, "vault_path": { "type": "string" }, "limit": { "type": ["integer", "null"] } }, "required": ["query", "vault_path"] } }, "required": ["type", "params"] },
-        { "properties": { "type": { "const": "Ask" }, "params": { "properties": { "question": { "type": "string" }, "vault_path": { "type": "string" } }, "required": ["question", "vault_path"] } }, "required": ["type", "params"] }
+        { "properties": { "type": { "const": "Ask" }, "params": { "properties": { "question": { "type": "string" }, "vault_path": { "type": "string" } }, "required": ["question", "vault_path"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "ListMeetings" } }, "required": ["type"] },
+        { "properties": { "type": { "const": "ReprocessMeeting" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] }
       ]
     },
     "Response": {
@@ -37,6 +39,7 @@
         { "properties": { "type": { "const": "Mom" }, "data": { "properties": { "markdown": { "type": "string" } }, "required": ["markdown"] } }, "required": ["type", "data"] },
         { "properties": { "type": { "const": "SearchResults" }, "data": { "type": "array", "items": { "$ref": "#/definitions/SearchHit" } } }, "required": ["type", "data"] },
         { "properties": { "type": { "const": "Answer" }, "data": { "$ref": "#/definitions/AskAnswer" } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "MeetingList" }, "data": { "type": "array", "items": { "$ref": "#/definitions/MeetingSummary" } } }, "required": ["type", "data"] },
         { "properties": { "type": { "const": "Error" }, "data": { "properties": { "message": { "type": "string" } }, "required": ["message"] } }, "required": ["type", "data"] }
       ]
     },
@@ -167,6 +170,24 @@
         "citations": { "type": "array", "items": { "$ref": "#/definitions/Citation" } }
       },
       "required": ["text", "files_read", "citations"]
+    },
+    "ProcessingStatus": {
+      "description": "Durable state of a capture's AI enrichment (operational metadata, stored separately from the source).",
+      "properties": {
+        "state": { "enum": ["processing", "ready", "deferred", "failed"] },
+        "failure_kind": { "enum": ["temporary", "permanent"] },
+        "error": { "type": "string" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["state", "updated_at"]
+    },
+    "MeetingSummary": {
+      "description": "A captured meeting paired with its processing status — the unit the Inbox lists.",
+      "properties": {
+        "meeting": { "$ref": "#/definitions/Meeting" },
+        "status": { "$ref": "#/definitions/ProcessingStatus" }
+      },
+      "required": ["meeting"]
     }
   }
 }

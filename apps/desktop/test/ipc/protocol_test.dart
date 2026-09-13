@@ -7,7 +7,7 @@ import 'package:notely_desktop/ipc/protocol.dart';
 void main() {
   test('protocol version matches the engine contract', () {
     // Must be bumped in lockstep with PROTOCOL_VERSION in engine/src/ipc/protocol.rs.
-    expect(protocolVersion, 2);
+    expect(protocolVersion, 3);
   });
 
   group('requests serialize to the tagged wire shape', () {
@@ -98,6 +98,14 @@ void main() {
       expect(const Ask(question: 'what db?', vaultPath: '/vault').toJson(), {
         'type': 'Ask',
         'params': {'question': 'what db?', 'vault_path': '/vault'},
+      });
+    });
+
+    test('ListMeetings is a bare tag; ReprocessMeeting carries meeting_id', () {
+      expect(const ListMeetings().toJson(), {'type': 'ListMeetings'});
+      expect(const ReprocessMeeting('m1').toJson(), {
+        'type': 'ReprocessMeeting',
+        'params': {'meeting_id': 'm1'},
       });
     });
   });
@@ -202,6 +210,40 @@ void main() {
       expect(a.text, 'PostgreSQL was chosen [1].');
       expect(a.filesRead, ['/vault/arch.md']);
       expect(a.citations.single.startLine, 2);
+    });
+
+    test('MeetingList decodes meetings with their processing status', () {
+      final r = Response.fromJson({
+        'type': 'MeetingList',
+        'data': [
+          {
+            'meeting': {
+              'id': 'm1',
+              'title': 'Project X',
+              'created_at': '2026-09-13T10:42:00Z',
+            },
+            'status': {
+              'state': 'deferred',
+              'failure_kind': 'temporary',
+              'error': 'llm offline',
+            },
+          },
+          {
+            'meeting': {
+              'id': 'm2',
+              'title': 'Legacy',
+              'created_at': '2026-09-13T09:00:00Z',
+            },
+          },
+        ],
+      });
+      final list = (r as MeetingListResponse).meetings;
+      expect(list.length, 2);
+      expect(list[0].meeting.id, 'm1');
+      expect(list[0].status!.state, ProcessingState.deferred);
+      expect(list[0].status!.isRetryable, isTrue);
+      // A meeting without a stored status decodes with a null status (predates the layer).
+      expect(list[1].status, isNull);
     });
 
     test('unknown response type throws ProtocolException', () {

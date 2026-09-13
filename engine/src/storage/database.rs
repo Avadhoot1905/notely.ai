@@ -12,13 +12,14 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::domain::{Meeting, MeetingId, MeetingIr, Transcript};
+use crate::domain::{Meeting, MeetingId, MeetingIr, ProcessingStatus, Transcript};
 
 use super::repositories::{StorageError, Store};
 
 const ARTIFACT_TRANSCRIPT: &str = "transcript";
 const ARTIFACT_MEETING_IR: &str = "meeting_ir";
 const ARTIFACT_MOM: &str = "mom";
+const ARTIFACT_PROCESSING_STATUS: &str = "processing_status";
 
 /// SQLite storage. Cloneable handle sharing one connection.
 #[derive(Clone)]
@@ -209,6 +210,54 @@ impl Store for SqliteStore {
     async fn get_mom(&self, id: &MeetingId) -> Result<Option<String>, StorageError> {
         self.get_artifact(id, ARTIFACT_MOM).await
     }
+
+    async fn save_processing_status(
+        &self,
+        id: &MeetingId,
+        status: &ProcessingStatus,
+    ) -> Result<(), StorageError> {
+        let content = serde_json::to_string(status).map_err(se)?;
+        self.put_artifact(id, ARTIFACT_PROCESSING_STATUS, content)
+            .await
+    }
+
+    async fn get_processing_status(
+        &self,
+        id: &MeetingId,
+    ) -> Result<Option<ProcessingStatus>, StorageError> {
+        match self.get_artifact(id, ARTIFACT_PROCESSING_STATUS).await? {
+            Some(json) => Ok(Some(serde_json::from_str(&json).map_err(se)?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn list_processing_statuses(
+        &self,
+    ) -> Result<Vec<(MeetingId, ProcessingStatus)>, StorageError> {
+        let rows: Vec<(String, String)> = self
+            .with_conn(|c| {
+                let mut stmt = c
+                    .prepare("SELECT meeting_id, content FROM artifacts WHERE kind = ?1")
+                    .map_err(be)?;
+                let iter = stmt
+                    .query_map(params![ARTIFACT_PROCESSING_STATUS], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(be)?;
+                let mut out = Vec::new();
+                for r in iter {
+                    out.push(r.map_err(be)?);
+                }
+                Ok(out)
+            })
+            .await?;
+        rows.into_iter()
+            .map(|(id, json)| {
+                let status = serde_json::from_str(&json).map_err(se)?;
+                Ok((MeetingId(id), status))
+            })
+            .collect()
+    }
 }
 
 fn be<E: std::fmt::Display>(e: E) -> StorageError {
@@ -259,5 +308,41 @@ mod tests {
         store.save_mom(&id, "one").await.unwrap();
         store.save_mom(&id, "two").await.unwrap();
         assert_eq!(store.get_mom(&id).await.unwrap().as_deref(), Some("two"));
+    }
+
+    #[tokio::test]
+    async fn processing_status_round_trips_and_lists() {
+        use crate::domain::{ProcessingState, ProcessingStatus};
+        let store = SqliteStore::open_in_memory().unwrap();
+        let a = MeetingId::new();
+        let b = MeetingId::new();
+
+        assert!(store.get_processing_status(&a).await.unwrap().is_none());
+
+        store
+            .save_processing_status(&a, &ProcessingStatus::processing())
+            .await
+            .unwrap();
+        store
+            .save_processing_status(&b, &ProcessingStatus::deferred("llm offline"))
+            .await
+            .unwrap();
+        // Upsert overwrites in place.
+        store
+            .save_processing_status(&a, &ProcessingStatus::ready())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .get_processing_status(&a)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            ProcessingState::Ready
+        );
+        let all = store.list_processing_statuses().await.unwrap();
+        assert_eq!(all.len(), 2);
     }
 }

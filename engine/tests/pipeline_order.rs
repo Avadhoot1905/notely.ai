@@ -11,7 +11,9 @@ use notely_engine::ai::provider::{AiAnalyzer, AiError, AnalysisContext};
 use notely_engine::ai::ChunkFindings;
 use notely_engine::asr::provider::{AsrError, AsrProvider, AudioInput};
 use notely_engine::config::ChunkingConfig;
-use notely_engine::domain::{Meeting, MeetingId, MeetingIr, Transcript, TranscriptSegment};
+use notely_engine::domain::{
+    Meeting, MeetingId, MeetingIr, ProcessingStatus, Transcript, TranscriptSegment,
+};
 use notely_engine::media::{ExtractOptions, MediaError, MediaInfo, MediaProcessor, PreparedAudio};
 use notely_engine::pipeline::{JobRegistry, MeetingInput, Orchestrator};
 use notely_engine::preprocess::Chunk;
@@ -128,6 +130,25 @@ impl Store for FakeStore {
     }
     async fn get_mom(&self, _id: &MeetingId) -> Result<Option<String>, StorageError> {
         Ok(None)
+    }
+    async fn save_processing_status(
+        &self,
+        _id: &MeetingId,
+        _status: &ProcessingStatus,
+    ) -> Result<(), StorageError> {
+        record(&self.0, "store.save_processing_status");
+        Ok(())
+    }
+    async fn get_processing_status(
+        &self,
+        _id: &MeetingId,
+    ) -> Result<Option<ProcessingStatus>, StorageError> {
+        Ok(None)
+    }
+    async fn list_processing_statuses(
+        &self,
+    ) -> Result<Vec<(MeetingId, ProcessingStatus)>, StorageError> {
+        Ok(vec![])
     }
 }
 

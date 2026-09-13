@@ -17,7 +17,7 @@ use tokio::sync::broadcast::Sender as BroadcastSender;
 use crate::ai::{validation, AiAnalyzer, AiError, AnalysisContext, ChunkFindings};
 use crate::asr::{AsrError, AsrProvider, AudioInput};
 use crate::config::ChunkingConfig;
-use crate::domain::{Meeting, MeetingId, MeetingIr, Transcript};
+use crate::domain::{Meeting, MeetingId, MeetingIr, ProcessingStatus, Transcript};
 use crate::ipc::events::Event;
 use crate::media::{ExtractOptions, MediaError, MediaProcessor};
 use crate::preprocess::{self, PreparedTranscript};
@@ -102,7 +102,7 @@ impl Orchestrator {
         }
     }
 
-    /// Run the full pipeline for one meeting, updating the job registry and emitting events.
+    /// Run the full pipeline for a new meeting, updating the job registry and emitting events.
     pub async fn process(
         &self,
         job_id: &JobId,
@@ -111,21 +111,57 @@ impl Orchestrator {
         cancel: &CancelFlag,
     ) -> Result<MeetingId, PipelineError> {
         let result = self.run(job_id, input, events, cancel).await;
+        self.finalize(job_id, result, events).await
+    }
+
+    /// Re-run AI enrichment for an already-captured meeting, from its stored transcript.
+    ///
+    /// This is the retry path for a deferred/failed capture: the source (transcript) is already
+    /// safely persisted, so we never re-capture and never create a second meeting — the enrichment
+    /// is simply recomputed and its artifacts upserted. Idempotent by construction.
+    pub async fn reprocess(
+        &self,
+        job_id: &JobId,
+        meeting_id: &MeetingId,
+        events: &EventSink,
+        cancel: &CancelFlag,
+    ) -> Result<MeetingId, PipelineError> {
+        let result = self.rerun(job_id, meeting_id, events, cancel).await;
+        self.finalize(job_id, result, events).await
+    }
+
+    /// Apply the terminal outcome: update the job, persist a durable [`ProcessingStatus`], and emit
+    /// the terminal event. The source is already saved by this point, so a failure only defers/marks
+    /// enrichment — it never risks the capture.
+    async fn finalize(
+        &self,
+        job_id: &JobId,
+        result: Result<MeetingId, PipelineError>,
+        events: &EventSink,
+    ) -> Result<MeetingId, PipelineError> {
+        // `run`/`rerun` set the meeting id on the job early, so it's available even on failure.
+        let meeting_id = self.jobs.get(job_id).and_then(|j| j.meeting_id);
         match &result {
-            Ok(meeting_id) => {
+            Ok(id) => {
                 self.jobs.update(job_id, |j| {
                     j.status = JobStatus::Completed;
                     j.stage = JobStage::Done;
-                    j.meeting_id = Some(meeting_id.clone());
+                    j.meeting_id = Some(id.clone());
                 });
+                self.persist_status(id, ProcessingStatus::ready()).await;
                 let _ = events.send(Event::JobCompleted {
                     job_id: job_id.clone(),
-                    meeting_id: meeting_id.clone(),
+                    meeting_id: id.clone(),
                 });
             }
             Err(PipelineError::Cancelled) => {
                 self.jobs
                     .update(job_id, |j| j.status = JobStatus::Cancelled);
+                // Cancelled work is retryable — the source is intact.
+                if let Some(id) = &meeting_id {
+                    self.persist_status(id, ProcessingStatus::deferred("cancelled"))
+                        .await;
+                }
                 let _ = events.send(Event::JobFailed {
                     job_id: job_id.clone(),
                     message: "cancelled".to_string(),
@@ -137,6 +173,14 @@ impl Orchestrator {
                     j.status = JobStatus::Failed;
                     j.error = Some(message.clone());
                 });
+                if let Some(id) = &meeting_id {
+                    // Storage failures need attention; runtime/model/network failures are retryable.
+                    let status = match err {
+                        PipelineError::Storage(_) => ProcessingStatus::failed(message.clone()),
+                        _ => ProcessingStatus::deferred(message.clone()),
+                    };
+                    self.persist_status(id, status).await;
+                }
                 let _ = events.send(Event::JobFailed {
                     job_id: job_id.clone(),
                     message,
@@ -144,6 +188,14 @@ impl Orchestrator {
             }
         }
         result
+    }
+
+    /// Persist a processing status best-effort: it's operational metadata, so a write failure here
+    /// must never itself become a pipeline error (that would risk masking the real outcome).
+    async fn persist_status(&self, id: &MeetingId, status: ProcessingStatus) {
+        if let Err(e) = self.store.save_processing_status(id, &status).await {
+            tracing::warn!("failed to persist processing status for {id}: {e}");
+        }
     }
 
     async fn run(
@@ -170,6 +222,8 @@ impl Orchestrator {
         check_cancel(cancel)?;
 
         // 2. Obtain the raw transcript (either provided, or via media → ASR). Preserved as-is.
+        // THIS is the source of truth: once it (and the meeting) are persisted below, the capture
+        // is safe. Everything after is derived enrichment that can fail and be retried.
         let raw_transcript = match input {
             MeetingInput::Transcript { transcript, .. } => transcript,
             MeetingInput::Audio { path, .. } => {
@@ -179,27 +233,98 @@ impl Orchestrator {
         self.store
             .save_transcript(&meeting.id, &raw_transcript)
             .await?;
+        // Source is now safe; mark enrichment in-flight so an interruption is recoverable.
+        self.persist_status(&meeting.id, ProcessingStatus::processing())
+            .await;
         check_cancel(cancel)?;
 
-        // 3. Deterministic Rust: normalize + chunk (no LLM).
+        // 3-6. Derived enrichment (chunk → AI → render → store). Shared with the retry path.
+        self.enrich(
+            job_id,
+            &mut meeting,
+            &raw_transcript,
+            &context,
+            events,
+            cancel,
+        )
+        .await?;
+        Ok(meeting.id)
+    }
+
+    /// Re-run enrichment for an existing meeting from its stored transcript (the retry path).
+    async fn rerun(
+        &self,
+        job_id: &JobId,
+        meeting_id: &MeetingId,
+        events: &EventSink,
+        cancel: &CancelFlag,
+    ) -> Result<MeetingId, PipelineError> {
+        self.jobs.update(job_id, |j| {
+            j.status = JobStatus::Running;
+            j.meeting_id = Some(meeting_id.clone());
+        });
+
+        let mut meeting = self.store.get_meeting(meeting_id).await?.ok_or_else(|| {
+            PipelineError::Storage(StorageError::Backend(format!(
+                "cannot reprocess unknown meeting: {meeting_id}"
+            )))
+        })?;
+        let transcript = self
+            .store
+            .get_transcript(meeting_id)
+            .await?
+            .ok_or_else(|| {
+                PipelineError::Storage(StorageError::Backend(format!(
+                    "cannot reprocess meeting without a stored transcript: {meeting_id}"
+                )))
+            })?;
+
+        self.persist_status(meeting_id, ProcessingStatus::processing())
+            .await;
+        let _ = events.send(Event::ProcessingStarted {
+            job_id: job_id.clone(),
+            meeting_id: meeting_id.clone(),
+        });
+        check_cancel(cancel)?;
+
+        let context = AnalysisContext {
+            title: Some(meeting.title.clone()),
+        };
+        self.enrich(job_id, &mut meeting, &transcript, &context, events, cancel)
+            .await?;
+        Ok(meeting.id)
+    }
+
+    /// Derived enrichment from a persisted transcript: chunk → two-pass AI → render → store.
+    /// Shared by first-time processing and retry; all writes upsert, so it is safe to re-run.
+    async fn enrich(
+        &self,
+        job_id: &JobId,
+        meeting: &mut Meeting,
+        transcript: &Transcript,
+        context: &AnalysisContext,
+        events: &EventSink,
+        cancel: &CancelFlag,
+    ) -> Result<(), PipelineError> {
+        // Deterministic Rust: normalize + chunk (no LLM).
         self.stage(job_id, JobStage::Chunking);
         let _ = events.send(Event::ChunkingStarted {
             job_id: job_id.clone(),
         });
-        let prepared = preprocess::prepare(&raw_transcript, &self.chunking);
+        let prepared = preprocess::prepare(transcript, &self.chunking);
         let _ = events.send(Event::ChunkingCompleted {
             job_id: job_id.clone(),
             chunk_count: prepared.chunks.len(),
         });
         check_cancel(cancel)?;
 
-        // 4. AI: per-chunk extraction → synthesis → validation.
+        // AI: per-chunk extraction → synthesis → validation.
         let ir = self
-            .analyze(job_id, &prepared, &context, events, cancel)
+            .analyze(job_id, &prepared, context, events, cancel)
             .await?;
         self.store.save_meeting_ir(&meeting.id, &ir).await?;
 
-        // 5. Deterministic rendering → Markdown MOM (no LLM here).
+        // Deterministic rendering → Markdown MOM (no LLM here).
         self.stage(job_id, JobStage::Rendering);
         let _ = events.send(Event::RenderingStarted {
             job_id: job_id.clone(),
@@ -209,13 +334,12 @@ impl Orchestrator {
             job_id: job_id.clone(),
         });
 
-        // 6. Persist artifacts + meeting metadata (participants learned during analysis).
+        // Persist artifacts + meeting metadata (participants learned during analysis).
         self.stage(job_id, JobStage::Storing);
         self.store.save_mom(&meeting.id, &mom).await?;
         meeting.participants = ir.participants.clone();
-        self.store.save_meeting(&meeting).await?;
-
-        Ok(meeting.id)
+        self.store.save_meeting(meeting).await?;
+        Ok(())
     }
 
     /// Media normalization + ASR for the audio input path.

@@ -115,6 +115,75 @@ void main() {
     c.dispose();
   });
 
+  test(
+    'deferred enrichment is a safe outcome: notice, no error, session ends, file untouched',
+    () async {
+      final path = p.join(tempRoot.path, 'Deferred.md');
+      await File(path).writeAsString('# Deferred\n');
+      final editor = EditorController();
+      await editor.open(path);
+
+      final c = ListeningController(
+        audio: FakeAudioService(),
+        transcript: MockTranscriptService(
+          interval: const Duration(milliseconds: 20),
+        ),
+        summary: _DeferringSummary(),
+      );
+      await c.start();
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await c.stop();
+
+      final ok = await c.summarise(editor: editor);
+      // Treated as handled/safe — the source is persisted by the engine, only AI is deferred.
+      expect(ok, isTrue);
+      expect(c.state, ListeningState.idle);
+      expect(c.summariseError, isNull, reason: 'deferral is not an error');
+      expect(
+        c.notice,
+        isNotNull,
+        reason: 'user is reassured the capture is saved',
+      );
+      // The note file was NOT overwritten with a fake summary.
+      final onDisk = await File(path).readAsString();
+      expect(onDisk, '# Deferred\n');
+
+      editor.dispose();
+      c.dispose();
+    },
+  );
+
+  test('a genuine failure stays in review so the user can retry', () async {
+    final path = p.join(tempRoot.path, 'Broken.md');
+    await File(path).writeAsString('# Broken\n');
+    final editor = EditorController();
+    await editor.open(path);
+
+    final c = ListeningController(
+      audio: FakeAudioService(),
+      transcript: MockTranscriptService(
+        interval: const Duration(milliseconds: 20),
+      ),
+      summary: _FailingSummary(),
+    );
+    await c.start();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await c.stop();
+
+    final ok = await c.summarise(editor: editor);
+    expect(ok, isFalse);
+    expect(
+      c.state,
+      ListeningState.reviewing,
+      reason: 'stay in review to retry',
+    );
+    expect(c.summariseError, isNotNull);
+    expect(c.entries, isNotEmpty, reason: 'transcript retained for retry');
+
+    editor.dispose();
+    c.dispose();
+  });
+
   test('close discards review without touching the file', () async {
     final c = makeController(FakeAudioService());
     await c.start();
@@ -133,4 +202,31 @@ void main() {
     expect(c.state, ListeningState.paused);
     c.dispose();
   });
+}
+
+/// Simulates the engine persisting the source but deferring AI enrichment (e.g. LLM offline).
+class _DeferringSummary implements SummaryService {
+  @override
+  Future<String> summarise({
+    required List<TranscriptEntry> segments,
+    required String currentMarkdown,
+    String? title,
+  }) async {
+    throw const DeferredProcessingException(
+      meetingId: 'meeting-1',
+      reason: 'model unavailable',
+    );
+  }
+}
+
+/// Simulates a genuine, non-deferred failure (nothing safely persisted downstream).
+class _FailingSummary implements SummaryService {
+  @override
+  Future<String> summarise({
+    required List<TranscriptEntry> segments,
+    required String currentMarkdown,
+    String? title,
+  }) async {
+    throw Exception('backend exploded');
+  }
 }

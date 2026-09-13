@@ -11,6 +11,7 @@ pub mod knowledge;
 pub mod meeting;
 pub mod meeting_ir;
 pub mod participant;
+pub mod processing;
 pub mod transcript;
 
 pub use action_item::{ActionItem, ActionStatus};
@@ -19,4 +20,5 @@ pub use knowledge::{AskAnswer, Citation, SearchHit};
 pub use meeting::{Meeting, MeetingId};
 pub use meeting_ir::{Evidence, MeetingIr, OpenQuestion, Risk, Topic};
 pub use participant::Participant;
+pub use processing::{FailureKind, MeetingSummary, ProcessingState, ProcessingStatus};
 pub use transcript::{Transcript, TranscriptSegment};

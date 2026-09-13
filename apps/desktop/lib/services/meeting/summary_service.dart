@@ -8,6 +8,24 @@
 
 import '../transcript/transcript_service.dart';
 
+/// Raised when the source was safely captured/persisted but AI enrichment could not finish (e.g.
+/// the local model was unavailable, or it timed out). This is deliberately NOT a data-loss error:
+/// the capture is safe and enrichment can be retried later. [meetingId] identifies the persisted
+/// capture when the engine accepted it, so the retry can target the exact meeting (no duplicate).
+class DeferredProcessingException implements Exception {
+  const DeferredProcessingException({this.meetingId, this.reason});
+
+  /// The engine's id for the safely-persisted capture, if enrichment reached the engine.
+  final String? meetingId;
+
+  /// A short reason (e.g. "model unavailable"), for logging — not shown verbatim to the user.
+  final String? reason;
+
+  @override
+  String toString() =>
+      'DeferredProcessingException(meetingId: $meetingId, reason: $reason)';
+}
+
 abstract class SummaryService {
   /// Produce Markdown for the meeting. [currentMarkdown] is the note's existing content (so an
   /// implementation can preserve or append); [title] hints at a heading.

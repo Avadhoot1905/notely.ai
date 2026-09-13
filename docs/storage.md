@@ -8,12 +8,17 @@ IPC, never database internals.
 
 Start simple and inspectable, and don't lock into an elaborate schema prematurely.
 
-- The engine persists, per meeting: **metadata**, **transcript**, **Meeting IR**, and the
-  **rendered MOM**.
-- A lightweight embedded database (SQLite is the likely choice) is a good default for metadata
-  and querying; large artifacts (audio, long transcripts) may live as files alongside it.
-- All of this is confined behind `storage::Storage` and **repository traits**
-  (`storage/repositories/`). Callers use the traits; the backend is an implementation detail.
+- The engine persists, per meeting: **metadata**, **transcript**, **Meeting IR**, the
+  **rendered MOM**, and a **processing status** (`processing`/`ready`/`deferred`/`failed`).
+- Crucially, the **source** (meeting + transcript) is saved *before* any AI runs, and the
+  processing status is a separate artifact. So an AI/LLM failure never loses the capture — it just
+  marks enrichment `deferred` (retryable). This is the storage-level half of "AI failure ≠ data
+  loss" (see [pipeline.md](pipeline.md)).
+- A lightweight embedded database (SQLite) holds meetings + artifacts keyed by `(meeting_id, kind)`
+  (`transcript`, `meeting_ir`, `mom`, `processing_status`), so new artifact kinds need no schema
+  change. A separate, rebuildable `search.db` holds the FTS5 vault index.
+- All of this is confined behind the **`Store` trait** (`storage/repositories/`). Callers use the
+  trait; the backend is an implementation detail.
 
 A conceptual on-disk layout for a meeting's artifacts:
 

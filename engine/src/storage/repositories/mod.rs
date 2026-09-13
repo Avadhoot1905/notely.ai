@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 
-use crate::domain::{Meeting, MeetingId, MeetingIr, Transcript};
+use crate::domain::{Meeting, MeetingId, MeetingIr, ProcessingStatus, Transcript};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
@@ -36,4 +36,20 @@ pub trait Store: Send + Sync {
     /// Persist a rendered MOM (e.g. Markdown) for a meeting.
     async fn save_mom(&self, id: &MeetingId, mom: &str) -> Result<(), StorageError>;
     async fn get_mom(&self, id: &MeetingId) -> Result<Option<String>, StorageError>;
+
+    /// Persist the AI-enrichment [`ProcessingStatus`] for a meeting. This is operational metadata,
+    /// stored separately from the source so it never affects source safety.
+    async fn save_processing_status(
+        &self,
+        id: &MeetingId,
+        status: &ProcessingStatus,
+    ) -> Result<(), StorageError>;
+    async fn get_processing_status(
+        &self,
+        id: &MeetingId,
+    ) -> Result<Option<ProcessingStatus>, StorageError>;
+    /// All persisted processing statuses, keyed by meeting id. Powers recovery and the Inbox.
+    async fn list_processing_statuses(
+        &self,
+    ) -> Result<Vec<(MeetingId, ProcessingStatus)>, StorageError>;
 }

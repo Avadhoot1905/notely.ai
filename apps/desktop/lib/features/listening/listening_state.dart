@@ -52,6 +52,7 @@ class ListeningController extends ChangeNotifier {
   MeetingSession? _session;
   bool _summarising = false;
   String? _summariseError;
+  String? _notice;
 
   // Elapsed-capture accounting: accumulated time from finished listening spans, plus the span
   // in progress since [_runningSince]. Pausing folds the current span in; resuming reopens one.
@@ -88,6 +89,15 @@ class ListeningController extends ChangeNotifier {
   void clearSummariseError() {
     if (_summariseError == null) return;
     _summariseError = null;
+    notifyListeners();
+  }
+
+  /// A calm, positive notice (not an error) — e.g. a capture was saved but AI enrichment was
+  /// deferred. Shown once, then cleared. Reassures the user their data is safe.
+  String? get notice => _notice;
+  void clearNotice() {
+    if (_notice == null) return;
+    _notice = null;
     notifyListeners();
   }
 
@@ -174,9 +184,19 @@ class ListeningController extends ChangeNotifier {
         title: null,
       );
       await editor.setContent(markdown);
+    } on DeferredProcessingException catch (_) {
+      // Not a failure: the engine safely persisted the transcript (the source of truth) BEFORE
+      // AI ran, so the capture is saved — only enrichment is deferred. Reassure and end the
+      // session; the capture waits in the Inbox and can be retried when AI is available. We never
+      // lose the source, and never re-submit (which would duplicate the capture).
+      _summarising = false;
+      _notice = 'Saved — Notely will finish the summary when AI is available.';
+      notifyListeners();
+      _endSession();
+      return true;
     } catch (e) {
-      // Surface the failure and stay in Review so the user can retry (or Close). We never fake a
-      // successful summary when the backend errors.
+      // A genuine failure (e.g. the engine dropped before persisting): stay in Review so the user
+      // can retry or Close. We never fake a successful summary when the backend errors.
       _summariseError = _describeError(e);
       _summarising = false;
       notifyListeners();

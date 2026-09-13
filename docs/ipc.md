@@ -35,7 +35,8 @@ Defined in `engine/src/ipc/protocol.rs` and `events.rs`.
 
 `Health` · `ProcessMeeting { input }` · `GetJob { job_id }` · `CancelJob { job_id }` ·
 `GetMeeting { meeting_id }` · `GetTranscript { meeting_id }` · `GetMom { meeting_id }` ·
-`Search { query, vault_path, limit? }` · `Ask { question, vault_path }`
+`Search { query, vault_path, limit? }` · `Ask { question, vault_path }` · `ListMeetings` ·
+`ReprocessMeeting { meeting_id }`
 
 `ProcessInput` is either `Transcript { title?, transcript }` (the supported v0 path) or
 `Audio { title?, path }` (needs media + ASR — not wired end-to-end yet).
@@ -45,9 +46,14 @@ incremental FTS5 index of the notes on disk and answers strictly from what it re
 returns a source-grounded answer with citations (path + line range + snippet); if the LLM runtime
 is unavailable it degrades to a deterministic list of the matching passages rather than failing.
 
+`ListMeetings` returns captured meetings with their durable `ProcessingStatus` (the Inbox).
+`ReprocessMeeting` retries AI enrichment for a captured meeting from its stored transcript — the
+source is persisted before AI runs, so retry is idempotent and never re-captures or duplicates.
+
 **Responses (immediate):** `Health(info)` · `JobAccepted { job_id }` · `Job(job)` ·
 `Meeting(meeting)` · `Transcript(transcript)` · `Mom { markdown }` ·
-`SearchResults([SearchHit])` · `Answer(AskAnswer)` · `Error { message }`
+`SearchResults([SearchHit])` · `Answer(AskAnswer)` · `MeetingList([MeetingSummary])` ·
+`Error { message }`
 
 **Events (Engine → Flutter, async):**
 
@@ -85,8 +91,9 @@ stages.
 
 - **`request_id`** correlates a response with its request.
 - **`job_id`** tracks a long-running pipeline run for progress and cancellation.
-- **`PROTOCOL_VERSION`** (currently `2`) is sent in every envelope. The client refuses an engine
-  with a mismatched major version. (v2 added `Search`/`Ask` and `SearchResults`/`Answer`.)
+- **`PROTOCOL_VERSION`** (currently `3`) is sent in every envelope. The client refuses an engine
+  with a mismatched major version. (v2 added `Search`/`Ask` + `SearchResults`/`Answer`; v3 added
+  `ListMeetings`/`ReprocessMeeting` + `MeetingList` for the Inbox and reliable retry.)
 
 ## Versioning philosophy
 

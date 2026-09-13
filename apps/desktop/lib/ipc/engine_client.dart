@@ -430,6 +430,21 @@ class EngineClient {
     throw _unexpected(resp, 'Answer');
   }
 
+  /// List captured meetings with their processing status (Inbox + recovery UI).
+  Future<List<MeetingSummary>> listMeetings() async {
+    final resp = await send(const ListMeetings());
+    if (resp is MeetingListResponse) return resp.meetings;
+    throw _unexpected(resp, 'MeetingList');
+  }
+
+  /// Retry AI enrichment for an existing meeting; returns the accepted job id. Progress arrives via
+  /// [events]. Idempotent on the engine side — never creates a duplicate meeting.
+  Future<String> reprocessMeeting(String meetingId) async {
+    final resp = await send(ReprocessMeeting(meetingId));
+    if (resp is JobAcceptedResponse) return resp.jobId;
+    throw _unexpected(resp, 'JobAccepted');
+  }
+
   Exception _unexpected(Response resp, String expected) {
     if (resp is ErrorResponse) return EngineError(resp.message);
     return ProtocolException(

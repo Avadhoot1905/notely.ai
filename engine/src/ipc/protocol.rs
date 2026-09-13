@@ -5,14 +5,15 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{AskAnswer, Meeting, MeetingId, SearchHit, Transcript};
+use crate::domain::{AskAnswer, Meeting, MeetingId, MeetingSummary, SearchHit, Transcript};
 use crate::pipeline::jobs::{Job, JobId};
 
 /// Bumped on any breaking change to requests, responses, or events. The Dart client must refuse
 /// to talk to an engine with a mismatched major version.
 ///
 /// v2: added vault-wide `Search`/`Ask` requests and `SearchResults`/`Answer` responses.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// v3: added `ListMeetings`/`ReprocessMeeting` and the `MeetingList` response (Inbox + retry).
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Correlates a response with the request that produced it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +81,11 @@ pub enum Request {
         question: String,
         vault_path: String,
     },
+    /// List captured meetings with their processing status (powers the Inbox + recovery UI).
+    ListMeetings,
+    /// Retry AI enrichment for an already-captured meeting from its stored transcript. Idempotent:
+    /// reuses the meeting, never re-captures or duplicates. Reports progress via events.
+    ReprocessMeeting { meeting_id: MeetingId },
 }
 
 /// Health details.
@@ -114,6 +120,8 @@ pub enum Response {
     SearchResults(Vec<SearchHit>),
     /// A source-grounded answer for a [`Request::Ask`].
     Answer(AskAnswer),
+    /// Captured meetings + their processing status for a [`Request::ListMeetings`].
+    MeetingList(Vec<MeetingSummary>),
     /// The request failed.
     Error {
         message: String,

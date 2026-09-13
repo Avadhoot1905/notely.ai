@@ -12,7 +12,8 @@
 /// with a mismatched major version.
 ///
 /// v2: added vault-wide `Search`/`Ask` requests and `SearchResults`/`Answer` responses.
-const int protocolVersion = 2;
+/// v3: added `ListMeetings`/`ReprocessMeeting` and the `MeetingList` response (Inbox + retry).
+const int protocolVersion = 3;
 
 // ---------------------------------------------------------------------------
 // Domain models (mirror engine/src/domain and pipeline/jobs.rs).
@@ -120,6 +121,74 @@ class Meeting {
         .map((e) => Participant.fromJson(e as Map<String, dynamic>))
         .toList(growable: false),
     durationSeconds: (json['duration_seconds'] as num?)?.toDouble(),
+  );
+}
+
+/// Where a capture's AI enrichment stands (mirrors `domain::ProcessingState`).
+enum ProcessingState {
+  processing,
+  ready,
+  deferred,
+  failed,
+  unknown;
+
+  static ProcessingState fromWire(String s) => switch (s) {
+    'processing' => ProcessingState.processing,
+    'ready' => ProcessingState.ready,
+    'deferred' => ProcessingState.deferred,
+    'failed' => ProcessingState.failed,
+    _ => ProcessingState.unknown,
+  };
+}
+
+/// Whether a failure is worth a one-click retry (mirrors `domain::FailureKind`).
+enum FailureKind {
+  temporary,
+  permanent,
+  unknown;
+
+  static FailureKind fromWire(String? s) => switch (s) {
+    'temporary' => FailureKind.temporary,
+    'permanent' => FailureKind.permanent,
+    _ => FailureKind.unknown,
+  };
+}
+
+/// A capture's durable processing status (mirrors `domain::ProcessingStatus`).
+class ProcessingStatus {
+  final ProcessingState state;
+  final FailureKind? failureKind;
+  final String? error;
+
+  const ProcessingStatus({required this.state, this.failureKind, this.error});
+
+  /// A one-click retry makes sense for anything deferred, plus temporary failures.
+  bool get isRetryable =>
+      state == ProcessingState.deferred ||
+      (state == ProcessingState.failed && failureKind == FailureKind.temporary);
+
+  factory ProcessingStatus.fromJson(Map<String, dynamic> json) =>
+      ProcessingStatus(
+        state: ProcessingState.fromWire(json['state'] as String? ?? ''),
+        failureKind: json['failure_kind'] == null
+            ? null
+            : FailureKind.fromWire(json['failure_kind'] as String?),
+        error: json['error'] as String?,
+      );
+}
+
+/// A captured meeting paired with its enrichment status (mirrors `domain::MeetingSummary`).
+class MeetingSummary {
+  final Meeting meeting;
+  final ProcessingStatus? status;
+
+  const MeetingSummary({required this.meeting, this.status});
+
+  factory MeetingSummary.fromJson(Map<String, dynamic> json) => MeetingSummary(
+    meeting: Meeting.fromJson(json['meeting'] as Map<String, dynamic>),
+    status: json['status'] == null
+        ? null
+        : ProcessingStatus.fromJson(json['status'] as Map<String, dynamic>),
   );
 }
 
@@ -372,6 +441,26 @@ class Ask extends Request {
   };
 }
 
+/// List captured meetings with their processing status (Inbox + recovery UI).
+class ListMeetings extends Request {
+  const ListMeetings();
+  @override
+  String get type => 'ListMeetings';
+  @override
+  Map<String, dynamic>? get params => null;
+}
+
+/// Retry AI enrichment for an already-captured meeting from its stored transcript. Idempotent:
+/// the engine reuses the meeting, so retrying never re-captures or duplicates.
+class ReprocessMeeting extends Request {
+  final String meetingId;
+  const ReprocessMeeting(this.meetingId);
+  @override
+  String get type => 'ReprocessMeeting';
+  @override
+  Map<String, dynamic>? get params => {'meeting_id': meetingId};
+}
+
 // ---------------------------------------------------------------------------
 // Responses (Engine -> Flutter). Mirrors `ipc::protocol::Response`, which is
 // serde-tagged `{ "type": <variant>, "data": { ... } }`.
@@ -431,6 +520,12 @@ sealed class Response {
       case 'Answer':
         return AnswerResponse(
           EngineAnswer.fromJson(data as Map<String, dynamic>),
+        );
+      case 'MeetingList':
+        return MeetingListResponse(
+          (data as List)
+              .map((e) => MeetingSummary.fromJson(e as Map<String, dynamic>))
+              .toList(growable: false),
         );
       case 'Error':
         return ErrorResponse(
@@ -553,6 +648,11 @@ class SearchResultsResponse extends Response {
 class AnswerResponse extends Response {
   final EngineAnswer answer;
   const AnswerResponse(this.answer);
+}
+
+class MeetingListResponse extends Response {
+  final List<MeetingSummary> meetings;
+  const MeetingListResponse(this.meetings);
 }
 
 class ErrorResponse extends Response {

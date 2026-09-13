@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import '../features/ask/ask_state.dart';
 import '../features/editor/editor_state.dart';
 import '../features/explorer/explorer_state.dart';
+import '../features/inbox/inbox_state.dart';
 import '../features/listening/listening_state.dart';
 import '../features/meetings/meeting_session_manager.dart';
 import '../features/stash/stash_state.dart';
@@ -24,6 +25,7 @@ class AppScope extends InheritedWidget {
     required this.listening,
     required this.theme,
     required this.ask,
+    required this.inbox,
     required this.meetings,
     required this.engine,
     required super.child,
@@ -35,6 +37,7 @@ class AppScope extends InheritedWidget {
   final ListeningController listening;
   final ThemeController theme;
   final AskController ask;
+  final InboxController inbox;
   final MeetingSessionManager meetings;
 
   /// The single IPC boundary to the Rust engine. Widgets observe [EngineClient.state] for the
@@ -55,6 +58,7 @@ class AppScope extends InheritedWidget {
       listening != oldWidget.listening ||
       theme != oldWidget.theme ||
       ask != oldWidget.ask ||
+      inbox != oldWidget.inbox ||
       meetings != oldWidget.meetings ||
       engine != oldWidget.engine;
 }

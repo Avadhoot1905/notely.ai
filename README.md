@@ -110,6 +110,10 @@ Grouped by area, and limited to what actually works in the current tree.
   and asks the local LLM to answer **citing only those sources** — every answer links back to the
   exact note and line range, which you can click to open. If the engine or its LLM isn't running,
   Ask degrades to offline keyword retrieval rather than failing (AI failure never loses your data).
+- **Inbox**: captured meetings, each with a clear state — *Ready*, *Processing*, *AI deferred*, or
+  *Failed*. Because the transcript (the source) is persisted **before** any AI runs, a capture is
+  never lost when the model is unavailable; it lands in the Inbox as *AI deferred* and can be
+  retried in one click when AI comes back. Retry re-uses the stored capture, so it never duplicates.
 - Light/dark theme.
 
 ### Meeting companion
@@ -436,8 +440,10 @@ Directions, not commitments — see the decision log ([`docs/decisions.md`](docs
 open questions ([`docs/research.md`](docs/research.md)) for the reasoning.
 
 - **Current:** local Markdown workspace; source-grounded Ask (engine-side FTS5 retrieval + local
-  LLM, with citations and offline fallback); meeting detection + notification + overlay (macOS
-  verified); local two-pass AI pipeline (transcript → Meeting IR → Markdown) proven end-to-end.
+  LLM, with citations and offline fallback); Inbox with durable capture states + one-click retry
+  (source persisted before AI, so AI failure never loses data); meeting detection + notification +
+  overlay (macOS verified); local two-pass AI pipeline (transcript → Meeting IR → Markdown) proven
+  end-to-end.
 - **Near-term:** runtime-verify and harden the Windows/Linux native runtimes (incl. tray relaunch
   and companion-position persistence); wire real ASR into live listening; semantic (embedding)
   search alongside Ask's full-text retrieval; HTML export.

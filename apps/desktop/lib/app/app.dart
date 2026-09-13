@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../features/ask/ask_state.dart';
 import '../features/editor/editor_state.dart';
 import '../features/explorer/explorer_state.dart';
+import '../features/inbox/inbox_state.dart';
 import '../features/listening/listening_state.dart';
 import '../features/meetings/meeting_session_manager.dart';
 import '../features/stash/stash_picker.dart';
@@ -66,6 +67,8 @@ class _NotelyAppState extends State<NotelyApp> {
   late final AskController _ask = AskController(
     service: EngineAskService(client: _engine),
   );
+  // The Inbox is a view over the engine's captured meetings + their processing status.
+  late final InboxController _inbox = InboxController(engine: _engine);
 
   // Meeting-detection runtime. Deliberately OWNED BY THE APP RUNTIME, not gated by the main
   // window or an open stash: detection, the OS notification, and the companion overlay must keep
@@ -100,6 +103,8 @@ class _NotelyAppState extends State<NotelyApp> {
     // Begin connecting to the engine. The client reconnects with capped backoff, so the app is
     // usable (and shows connection state) whether or not the engine is running yet.
     if (widget.autoConnectEngine) _engine.start();
+    // Keep the inbox in sync with the engine (reloads on connect + when jobs finish).
+    _inbox.start();
     _startMeetingRuntime();
   }
 
@@ -135,6 +140,7 @@ class _NotelyAppState extends State<NotelyApp> {
     _listening.dispose();
     _theme.dispose();
     _ask.dispose();
+    _inbox.dispose();
     _meetings.dispose();
     _detector.dispose();
     _notifications.dispose();
@@ -160,6 +166,7 @@ class _NotelyAppState extends State<NotelyApp> {
           listening: _listening,
           theme: _theme,
           ask: _ask,
+          inbox: _inbox,
           meetings: _meetings,
           engine: _engine,
           child: const _AppGate(),
