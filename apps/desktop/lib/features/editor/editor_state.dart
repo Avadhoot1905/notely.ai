@@ -31,6 +31,7 @@ class EditorController extends ChangeNotifier {
   static const Duration _autosaveDebounce = Duration(milliseconds: 800);
 
   String? _openPath;
+
   /// Line ending the open file used on disk. Editing happens in LF in-memory; saves restore this
   /// so a Windows-authored CRLF file is not silently rewritten to LF (and vice versa).
   String _eol = '\n';

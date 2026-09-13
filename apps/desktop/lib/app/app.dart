@@ -8,16 +8,20 @@
 import 'package:flutter/material.dart';
 
 import '../features/ask/ask_state.dart';
-import '../features/calls/call_detection_state.dart';
-import '../features/calls/call_notes_prompt.dart';
 import '../features/editor/editor_state.dart';
 import '../features/explorer/explorer_state.dart';
-import '../features/listening/listening_overlay.dart';
 import '../features/listening/listening_state.dart';
+import '../features/meetings/meeting_session_manager.dart';
 import '../features/stash/stash_picker.dart';
 import '../features/stash/stash_state.dart';
 import '../features/workspace/workspace_shell.dart';
+import '../services/companion/companion_window_service.dart';
 import '../services/filesystem/file_watcher_service.dart';
+import '../services/meetings/meeting_detector.dart';
+import '../services/meetings/meeting_settings.dart';
+import '../services/notifications/notification_service.dart';
+import '../services/platform/platform_capabilities.dart';
+import '../services/window/window_service.dart';
 import 'app_scope.dart';
 import 'theme.dart';
 import 'theme_controller.dart';
@@ -38,7 +42,26 @@ class _NotelyAppState extends State<NotelyApp> {
   late final ListeningController _listening = ListeningController();
   late final ThemeController _theme = ThemeController();
   late final AskController _ask = AskController();
-  late final CallDetectionController _callDetection = CallDetectionController();
+
+  // Meeting-detection runtime. Deliberately OWNED BY THE APP RUNTIME, not gated by the main
+  // window or an open stash: detection, the OS notification, and the companion overlay must keep
+  // working while the main window is minimized/hidden. Native surfaces (notifications, detector,
+  // companion window) degrade to no-ops on platforms/hosts without an implementation.
+  final MeetingDetector _detector = PlatformMeetingDetector();
+  final NotificationService _notifications = PlatformNotificationService();
+  final CompanionWindowService _companion = PlatformCompanionWindowService();
+  static const WindowService _window = PlatformWindowService();
+  final MeetingSettingsStore _meetingSettingsStore = MeetingSettingsStore();
+  final PlatformCapabilitiesService _capabilitiesService =
+      PlatformCapabilitiesService();
+  late final MeetingSessionManager _meetings = MeetingSessionManager(
+    detector: _detector,
+    notifications: _notifications,
+    companion: _companion,
+    listening: _listening,
+    resolveActiveFile: () => _editor.openPath,
+    onOpenInNotely: _window.focusMain,
+  );
 
   String? _loadedRoot;
 
@@ -50,6 +73,18 @@ class _NotelyAppState extends State<NotelyApp> {
     _stash.restore();
     _theme.restore();
     _ask.restore();
+    _startMeetingRuntime();
+  }
+
+  Future<void> _startMeetingRuntime() async {
+    // Ask the OS what it can actually do; the runtime stays inert where meeting support is absent
+    // (e.g. platforms whose native adapter isn't implemented yet) rather than opening dead channels.
+    final capabilities = await _capabilitiesService.resolve();
+    await _meetings.start(capabilities: capabilities);
+    if (!capabilities.meetingDetection) return;
+    // Apply persisted detection settings once the runtime is up.
+    final settings = await _meetingSettingsStore.load();
+    await _meetings.updateSettings(settings);
   }
 
   void _syncExplorerRoot() {
@@ -58,12 +93,9 @@ class _NotelyAppState extends State<NotelyApp> {
       _loadedRoot = path;
       _explorer.setRoot(path);
       _ask.setStash(path);
-      // Once a stash is open, watch for calls so we can offer to take notes.
-      _callDetection.start();
     } else if (path == null) {
       _loadedRoot = null;
       _ask.setStash(null);
-      _callDetection.stop();
     }
   }
 
@@ -76,7 +108,10 @@ class _NotelyAppState extends State<NotelyApp> {
     _listening.dispose();
     _theme.dispose();
     _ask.dispose();
-    _callDetection.dispose();
+    _meetings.dispose();
+    _detector.dispose();
+    _notifications.dispose();
+    _companion.dispose();
     super.dispose();
   }
 
@@ -97,7 +132,7 @@ class _NotelyAppState extends State<NotelyApp> {
           listening: _listening,
           theme: _theme,
           ask: _ask,
-          callDetection: _callDetection,
+          meetings: _meetings,
           child: const _AppGate(),
         ),
       ),
@@ -127,10 +162,9 @@ class _AppGate extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             if (stash.isOpen) const WorkspaceShell() else ColoredBox(color: bg),
-            // Call-notes prompt + the floating "listening" widget live above the workspace but
-            // below the picker, so switching stashes always draws over them.
-            if (stash.isOpen) const ListeningOverlay(),
-            if (stash.isOpen) const CallNotesPrompt(),
+            // The meeting notification (OS-level) and the floating companion (a separate native
+            // overlay window) are NOT rendered here — they live outside the main window and are
+            // driven by MeetingSessionManager + the native runner.
             if (stash.showPicker) const StashPicker(),
           ],
         );

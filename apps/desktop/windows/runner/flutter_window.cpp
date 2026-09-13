@@ -27,6 +27,10 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  // Boot the native meeting/companion runtime on the main engine (see notely_runtime.cpp).
+  notely_runtime_ = std::make_unique<NotelyRuntime>(
+      flutter_controller_->engine(), GetHandle());
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -40,6 +44,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  // Tear down the native runtime first — it holds the main engine pointer.
+  notely_runtime_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

@@ -24,19 +24,22 @@ void main() {
   });
 
   group('case-only rename (safe on macOS/Windows case-insensitive FS)', () {
-    test('renames a file to a different case without a false collision', () async {
-      final path = p.join(tempRoot.path, 'notes.md');
-      await File(path).writeAsString('# Notes');
+    test(
+      'renames a file to a different case without a false collision',
+      () async {
+        final path = p.join(tempRoot.path, 'notes.md');
+        await File(path).writeAsString('# Notes');
 
-      final renamed = await fs.rename(path, 'Notes');
-      expect(p.basename(renamed), 'Notes.md');
-      // The content survived and there is exactly one file (no stray duplicate).
-      expect(await File(renamed).readAsString(), '# Notes');
-      final entries = Directory(
-        tempRoot.path,
-      ).listSync().map((e) => p.basename(e.path)).toList();
-      expect(entries.where((n) => n.toLowerCase() == 'notes.md').length, 1);
-    });
+        final renamed = await fs.rename(path, 'Notes');
+        expect(p.basename(renamed), 'Notes.md');
+        // The content survived and there is exactly one file (no stray duplicate).
+        expect(await File(renamed).readAsString(), '# Notes');
+        final entries = Directory(
+          tempRoot.path,
+        ).listSync().map((e) => p.basename(e.path)).toList();
+        expect(entries.where((n) => n.toLowerCase() == 'notes.md').length, 1);
+      },
+    );
 
     test('renames a folder to a different case', () async {
       final dir = p.join(tempRoot.path, 'projects');
@@ -48,20 +51,23 @@ void main() {
       expect(await File(p.join(renamed, 'a.md')).readAsString(), 'x');
     });
 
-    test('ExplorerController.move reports no collision for a case-only change', () async {
-      final path = p.join(tempRoot.path, 'todo.md');
-      await File(path).writeAsString('x');
-      final explorer = ExplorerController();
-      await explorer.setRoot(tempRoot.path);
+    test(
+      'ExplorerController.move reports no collision for a case-only change',
+      () async {
+        final path = p.join(tempRoot.path, 'todo.md');
+        await File(path).writeAsString('x');
+        final explorer = ExplorerController();
+        await explorer.setRoot(tempRoot.path);
 
-      final result = await explorer.move(
-        path,
-        destDir: tempRoot.path,
-        renameTo: 'Todo',
-      );
-      expect(result.status, MoveStatus.moved);
-      expect(p.basename(result.newPath!), 'Todo.md');
-    });
+        final result = await explorer.move(
+          path,
+          destDir: tempRoot.path,
+          renameTo: 'Todo',
+        );
+        expect(result.status, MoveStatus.moved);
+        expect(p.basename(result.newPath!), 'Todo.md');
+      },
+    );
   });
 
   test('a genuine collision is still rejected', () async {
@@ -107,22 +113,25 @@ void main() {
       expect(p.dirname(moved), destDir);
     });
 
-    test('move into current parent is a noop; into own descendant is invalid', () async {
-      final folder = p.join(tempRoot.path, 'folder');
-      final sub = p.join(folder, 'sub');
-      await Directory(sub).create(recursive: true);
-      final explorer = ExplorerController();
-      await explorer.setRoot(tempRoot.path);
+    test(
+      'move into current parent is a noop; into own descendant is invalid',
+      () async {
+        final folder = p.join(tempRoot.path, 'folder');
+        final sub = p.join(folder, 'sub');
+        await Directory(sub).create(recursive: true);
+        final explorer = ExplorerController();
+        await explorer.setRoot(tempRoot.path);
 
-      expect(
-        (await explorer.move(sub, destDir: folder)).status,
-        MoveStatus.noop,
-      );
-      expect(
-        (await explorer.move(folder, destDir: sub)).status,
-        MoveStatus.invalid,
-      );
-    });
+        expect(
+          (await explorer.move(sub, destDir: folder)).status,
+          MoveStatus.noop,
+        );
+        expect(
+          (await explorer.move(folder, destDir: sub)).status,
+          MoveStatus.invalid,
+        );
+      },
+    );
 
     test('collision on move surfaces MoveStatus.collision', () async {
       final src = p.join(tempRoot.path, 'x.md');
@@ -191,13 +200,9 @@ void main() {
 
     test('IoFileWatcherService fires on an external change', () async {
       final done = Completer<void>();
-      final handle = const IoFileWatcherService().watch(
-        tempRoot.path,
-        () {
-          if (!done.isCompleted) done.complete();
-        },
-        debounce: const Duration(milliseconds: 50),
-      );
+      final handle = const IoFileWatcherService().watch(tempRoot.path, () {
+        if (!done.isCompleted) done.complete();
+      }, debounce: const Duration(milliseconds: 50));
       // Give the OS watch a moment to arm, then make a change.
       await Future<void>.delayed(const Duration(milliseconds: 200));
       await File(p.join(tempRoot.path, 'external.md')).writeAsString('hi');
