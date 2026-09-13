@@ -3,7 +3,7 @@
   "$id": "https://notely.ai/schema/ipc.schema.json",
   "title": "Notely IPC protocol",
   "description": "Canonical, language-neutral schema for the Flutter <-> Rust IPC contract. Mirrored by engine/src/ipc (the source of truth) and apps/desktop/lib/ipc. See packages/protocol/README.md. Transport: newline-delimited JSON over a loopback TCP socket (default 127.0.0.1:8765). Requests are wrapped in a RequestEnvelope { protocol_version, request_id, ...Request }; responses in a ResponseEnvelope { protocol_version, request_id, ...Response }; events in an EventEnvelope { protocol_version, event: Event }.",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "definitions": {
     "ProcessInput": {
       "description": "What to process into a meeting. Tagged by `kind`.",
@@ -21,7 +21,9 @@
         { "properties": { "type": { "const": "CancelJob" }, "params": { "properties": { "job_id": { "type": "string" } }, "required": ["job_id"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "GetMeeting" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "GetTranscript" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
-        { "properties": { "type": { "const": "GetMom" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] }
+        { "properties": { "type": { "const": "GetMom" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "Search" }, "params": { "properties": { "query": { "type": "string" }, "vault_path": { "type": "string" }, "limit": { "type": ["integer", "null"] } }, "required": ["query", "vault_path"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "Ask" }, "params": { "properties": { "question": { "type": "string" }, "vault_path": { "type": "string" } }, "required": ["question", "vault_path"] } }, "required": ["type", "params"] }
       ]
     },
     "Response": {
@@ -33,6 +35,8 @@
         { "properties": { "type": { "const": "Meeting" }, "data": { "$ref": "#/definitions/Meeting" } }, "required": ["type", "data"] },
         { "properties": { "type": { "const": "Transcript" }, "data": { "$ref": "#/definitions/Transcript" } }, "required": ["type", "data"] },
         { "properties": { "type": { "const": "Mom" }, "data": { "properties": { "markdown": { "type": "string" } }, "required": ["markdown"] } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "SearchResults" }, "data": { "type": "array", "items": { "$ref": "#/definitions/SearchHit" } } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "Answer" }, "data": { "$ref": "#/definitions/AskAnswer" } }, "required": ["type", "data"] },
         { "properties": { "type": { "const": "Error" }, "data": { "properties": { "message": { "type": "string" } }, "required": ["message"] } }, "required": ["type", "data"] }
       ]
     },
@@ -133,6 +137,36 @@
         "confidence": { "type": "number" }
       },
       "required": ["start", "end", "text"]
+    },
+    "SearchHit": {
+      "description": "A ranked passage matched by a Search. Line indices are 0-based, inclusive.",
+      "properties": {
+        "path": { "type": "string" },
+        "title": { "type": "string" },
+        "start_line": { "type": "integer" },
+        "end_line": { "type": "integer" },
+        "snippet": { "type": "string" }
+      },
+      "required": ["path", "title", "start_line", "end_line", "snippet"]
+    },
+    "Citation": {
+      "description": "A cited passage backing an AskAnswer. Line indices are 0-based, inclusive.",
+      "properties": {
+        "path": { "type": "string" },
+        "start_line": { "type": "integer" },
+        "end_line": { "type": "integer" },
+        "snippet": { "type": "string" }
+      },
+      "required": ["path", "start_line", "end_line", "snippet"]
+    },
+    "AskAnswer": {
+      "description": "A source-grounded answer. `text` may contain `[n]` markers (1-based) referencing `citations`.",
+      "properties": {
+        "text": { "type": "string" },
+        "files_read": { "type": "array", "items": { "type": "string" } },
+        "citations": { "type": "array", "items": { "$ref": "#/definitions/Citation" } }
+      },
+      "required": ["text", "files_read", "citations"]
     }
   }
 }

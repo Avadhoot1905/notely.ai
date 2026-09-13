@@ -5,12 +5,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{Meeting, MeetingId, Transcript};
+use crate::domain::{AskAnswer, Meeting, MeetingId, SearchHit, Transcript};
 use crate::pipeline::jobs::{Job, JobId};
 
 /// Bumped on any breaking change to requests, responses, or events. The Dart client must refuse
 /// to talk to an engine with a mismatched major version.
-pub const PROTOCOL_VERSION: u32 = 1;
+///
+/// v2: added vault-wide `Search`/`Ask` requests and `SearchResults`/`Answer` responses.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Correlates a response with the request that produced it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +67,19 @@ pub enum Request {
     GetTranscript { meeting_id: MeetingId },
     /// Fetch the rendered (Markdown) MOM for a meeting.
     GetMom { meeting_id: MeetingId },
+    /// Full-text search the user's vault of Markdown notes at `vault_path`.
+    Search {
+        query: String,
+        vault_path: String,
+        /// Max hits to return (engine default when absent).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+    },
+    /// Answer a question grounded in the vault at `vault_path`, with source citations.
+    Ask {
+        question: String,
+        vault_path: String,
+    },
 }
 
 /// Health details.
@@ -95,6 +110,10 @@ pub enum Response {
     Mom {
         markdown: String,
     },
+    /// Ranked search hits for a [`Request::Search`].
+    SearchResults(Vec<SearchHit>),
+    /// A source-grounded answer for a [`Request::Ask`].
+    Answer(AskAnswer),
     /// The request failed.
     Error {
         message: String,

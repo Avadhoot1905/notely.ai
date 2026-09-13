@@ -15,9 +15,8 @@ Flutter ◀──event────  IPC  ◀── Engine
 ## Status (v0)
 
 - **Implemented:** the Rust server (`engine/src/ipc/server.rs`), the full request/response/event
-  types, versioning, job creation + cancellation, and dispatch into the pipeline.
-- **Scaffolded:** the Dart client (`apps/desktop/lib/ipc`) mirrors an older draft of the message
-  set and will be re-synced to the types below.
+  types, versioning, job creation + cancellation, dispatch into the pipeline, and vault-wide
+  `Search`/`Ask`. The Dart client (`apps/desktop/lib/ipc`) is a faithful, tested mirror.
 - **Transport (v0):** newline-delimited JSON over a loopback **TCP** socket (default
   `127.0.0.1:8765`). Each line is one JSON message. It is *not* an HTTP/web server — just framing.
   The transport is isolated in `server.rs`, so it can change without touching pipeline logic.
@@ -35,13 +34,20 @@ Defined in `engine/src/ipc/protocol.rs` and `events.rs`.
 **Requests (Flutter → Engine):**
 
 `Health` · `ProcessMeeting { input }` · `GetJob { job_id }` · `CancelJob { job_id }` ·
-`GetMeeting { meeting_id }` · `GetTranscript { meeting_id }` · `GetMom { meeting_id }`
+`GetMeeting { meeting_id }` · `GetTranscript { meeting_id }` · `GetMom { meeting_id }` ·
+`Search { query, vault_path, limit? }` · `Ask { question, vault_path }`
 
 `ProcessInput` is either `Transcript { title?, transcript }` (the supported v0 path) or
 `Audio { title?, path }` (needs media + ASR — not wired end-to-end yet).
 
+`Search`/`Ask` operate over the user's Markdown vault at `vault_path`: the engine keeps a cheap
+incremental FTS5 index of the notes on disk and answers strictly from what it retrieves. `Ask`
+returns a source-grounded answer with citations (path + line range + snippet); if the LLM runtime
+is unavailable it degrades to a deterministic list of the matching passages rather than failing.
+
 **Responses (immediate):** `Health(info)` · `JobAccepted { job_id }` · `Job(job)` ·
-`Meeting(meeting)` · `Transcript(transcript)` · `Mom { markdown }` · `Error { message }`
+`Meeting(meeting)` · `Transcript(transcript)` · `Mom { markdown }` ·
+`SearchResults([SearchHit])` · `Answer(AskAnswer)` · `Error { message }`
 
 **Events (Engine → Flutter, async):**
 
@@ -79,8 +85,8 @@ stages.
 
 - **`request_id`** correlates a response with its request.
 - **`job_id`** tracks a long-running pipeline run for progress and cancellation.
-- **`PROTOCOL_VERSION`** (currently `1`) is sent in every envelope. The client refuses an engine
-  with a mismatched major version.
+- **`PROTOCOL_VERSION`** (currently `2`) is sent in every envelope. The client refuses an engine
+  with a mismatched major version. (v2 added `Search`/`Ask` and `SearchResults`/`Answer`.)
 
 ## Versioning philosophy
 

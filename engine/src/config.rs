@@ -202,6 +202,12 @@ impl Config {
     pub fn database_path(&self) -> PathBuf {
         self.data_dir.join("notely.db")
     }
+
+    /// Path to the derived full-text search index. Kept separate from the meeting store because it
+    /// is rebuildable data (losing it costs only a re-sync), not a source of truth.
+    pub fn search_index_path(&self) -> PathBuf {
+        self.data_dir.join("search.db")
+    }
 }
 
 fn env_secs(name: &str) -> Option<Duration> {

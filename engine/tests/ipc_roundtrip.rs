@@ -82,6 +82,25 @@ async fn health_and_error_paths_over_the_socket() {
     .await;
     assert!(matches!(resp.response, Response::Error { .. }));
 
+    // Search: the new v2 request/response serializes across the wire. An empty vault path yields
+    // an empty result set (not an error), proving the variant round-trips end to end.
+    let resp = send_request(
+        &mut stream,
+        Request::Search {
+            query: "anything".into(),
+            vault_path: std::env::temp_dir()
+                .join("notely-does-not-exist")
+                .to_string_lossy()
+                .to_string(),
+            limit: Some(5),
+        },
+    )
+    .await;
+    match resp.response {
+        Response::SearchResults(hits) => assert!(hits.is_empty()),
+        other => panic!("expected SearchResults, got {other:?}"),
+    }
+
     shutdown_tx.send(()).ok();
     handle.await.unwrap();
 }

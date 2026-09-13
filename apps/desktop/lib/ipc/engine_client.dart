@@ -400,6 +400,36 @@ class EngineClient {
     throw _unexpected(resp, 'Mom');
   }
 
+  /// Full-text search the vault rooted at [vaultPath].
+  Future<List<EngineSearchHit>> search(
+    String query, {
+    required String vaultPath,
+    int? limit,
+  }) async {
+    final resp = await send(
+      Search(query: query, vaultPath: vaultPath, limit: limit),
+    );
+    if (resp is SearchResultsResponse) return resp.hits;
+    throw _unexpected(resp, 'SearchResults');
+  }
+
+  /// Ask a question grounded in the vault rooted at [vaultPath].
+  ///
+  /// Generation runs a local LLM, which can be slow, so this uses a generous timeout by default
+  /// rather than the standard request timeout.
+  Future<EngineAnswer> ask(
+    String question, {
+    required String vaultPath,
+    Duration timeout = const Duration(seconds: 120),
+  }) async {
+    final resp = await send(
+      Ask(question: question, vaultPath: vaultPath),
+      timeout: timeout,
+    );
+    if (resp is AnswerResponse) return resp.answer;
+    throw _unexpected(resp, 'Answer');
+  }
+
   Exception _unexpected(Response resp, String expected) {
     if (resp is ErrorResponse) return EngineError(resp.message);
     return ProtocolException(

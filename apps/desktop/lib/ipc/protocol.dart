@@ -10,7 +10,9 @@
 
 /// Must match `PROTOCOL_VERSION` in the Rust engine. The client refuses to talk to an engine
 /// with a mismatched major version.
-const int protocolVersion = 1;
+///
+/// v2: added vault-wide `Search`/`Ask` requests and `SearchResults`/`Answer` responses.
+const int protocolVersion = 2;
 
 // ---------------------------------------------------------------------------
 // Domain models (mirror engine/src/domain and pipeline/jobs.rs).
@@ -340,6 +342,36 @@ class GetMom extends Request {
   Map<String, dynamic>? get params => {'meeting_id': meetingId};
 }
 
+/// Full-text search the user's vault of Markdown notes rooted at [vaultPath].
+class Search extends Request {
+  final String query;
+  final String vaultPath;
+  final int? limit;
+  const Search({required this.query, required this.vaultPath, this.limit});
+  @override
+  String get type => 'Search';
+  @override
+  Map<String, dynamic>? get params => {
+    'query': query,
+    'vault_path': vaultPath,
+    if (limit != null) 'limit': limit,
+  };
+}
+
+/// Ask a question grounded in the vault rooted at [vaultPath]; the answer carries citations.
+class Ask extends Request {
+  final String question;
+  final String vaultPath;
+  const Ask({required this.question, required this.vaultPath});
+  @override
+  String get type => 'Ask';
+  @override
+  Map<String, dynamic>? get params => {
+    'question': question,
+    'vault_path': vaultPath,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Responses (Engine -> Flutter). Mirrors `ipc::protocol::Response`, which is
 // serde-tagged `{ "type": <variant>, "data": { ... } }`.
@@ -390,6 +422,16 @@ sealed class Response {
         return MomResponse(
           (data as Map<String, dynamic>)['markdown'] as String,
         );
+      case 'SearchResults':
+        return SearchResultsResponse(
+          (data as List)
+              .map((e) => EngineSearchHit.fromJson(e as Map<String, dynamic>))
+              .toList(growable: false),
+        );
+      case 'Answer':
+        return AnswerResponse(
+          EngineAnswer.fromJson(data as Map<String, dynamic>),
+        );
       case 'Error':
         return ErrorResponse(
           (data as Map<String, dynamic>)['message'] as String,
@@ -428,6 +470,89 @@ class TranscriptResponse extends Response {
 class MomResponse extends Response {
   final String markdown;
   const MomResponse(this.markdown);
+}
+
+/// A ranked search hit (mirrors `domain::SearchHit`). Line indices are 0-based, inclusive.
+class EngineSearchHit {
+  final String path;
+  final String title;
+  final int startLine;
+  final int endLine;
+  final String snippet;
+
+  const EngineSearchHit({
+    required this.path,
+    required this.title,
+    required this.startLine,
+    required this.endLine,
+    required this.snippet,
+  });
+
+  factory EngineSearchHit.fromJson(Map<String, dynamic> json) =>
+      EngineSearchHit(
+        path: json['path'] as String,
+        title: json['title'] as String? ?? '',
+        startLine: (json['start_line'] as num?)?.toInt() ?? 0,
+        endLine: (json['end_line'] as num?)?.toInt() ?? 0,
+        snippet: json['snippet'] as String? ?? '',
+      );
+}
+
+/// A cited passage backing an [EngineAnswer] (mirrors `domain::Citation`).
+class EngineCitation {
+  final String path;
+  final int startLine;
+  final int endLine;
+  final String snippet;
+
+  const EngineCitation({
+    required this.path,
+    required this.startLine,
+    required this.endLine,
+    required this.snippet,
+  });
+
+  factory EngineCitation.fromJson(Map<String, dynamic> json) => EngineCitation(
+    path: json['path'] as String,
+    startLine: (json['start_line'] as num?)?.toInt() ?? 0,
+    endLine: (json['end_line'] as num?)?.toInt() ?? 0,
+    snippet: json['snippet'] as String? ?? '',
+  );
+}
+
+/// A source-grounded answer (mirrors `domain::AskAnswer`). The [text] may contain `[n]` markers
+/// (1-based) that reference [citations].
+class EngineAnswer {
+  final String text;
+  final List<String> filesRead;
+  final List<EngineCitation> citations;
+
+  const EngineAnswer({
+    required this.text,
+    required this.filesRead,
+    required this.citations,
+  });
+
+  factory EngineAnswer.fromJson(Map<String, dynamic> json) => EngineAnswer(
+    text: json['text'] as String? ?? '',
+    filesRead:
+        (json['files_read'] as List?)?.whereType<String>().toList() ?? const [],
+    citations:
+        (json['citations'] as List?)
+            ?.map((e) => EngineCitation.fromJson(e as Map<String, dynamic>))
+            .toList(growable: false) ??
+        const [],
+  );
+}
+
+class SearchResultsResponse extends Response {
+  final List<EngineSearchHit> hits;
+  const SearchResultsResponse(this.hits);
+}
+
+class AnswerResponse extends Response {
+  final EngineAnswer answer;
+  const AnswerResponse(this.answer);
 }
 
 class ErrorResponse extends Response {

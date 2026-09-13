@@ -18,6 +18,7 @@ import '../features/stash/stash_picker.dart';
 import '../features/stash/stash_state.dart';
 import '../features/workspace/workspace_shell.dart';
 import '../ipc/engine_client.dart';
+import '../services/ask/engine_ask_service.dart';
 import '../services/companion/companion_window_service.dart';
 import '../services/filesystem/file_watcher_service.dart';
 import '../services/meeting/engine_summary_service.dart';
@@ -60,7 +61,11 @@ class _NotelyAppState extends State<NotelyApp> {
     summary: EngineSummaryService(client: _engine),
   );
   late final ThemeController _theme = ThemeController();
-  late final AskController _ask = AskController();
+  // Ask is source-grounded through the engine (retrieval + local LLM), degrading to the offline
+  // keyword answerer when the engine or its LLM is unavailable.
+  late final AskController _ask = AskController(
+    service: EngineAskService(client: _engine),
+  );
 
   // Meeting-detection runtime. Deliberately OWNED BY THE APP RUNTIME, not gated by the main
   // window or an open stash: detection, the OS notification, and the companion overlay must keep

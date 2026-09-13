@@ -22,6 +22,7 @@ pub mod media;
 pub mod pipeline;
 pub mod preprocess;
 pub mod renderer;
+pub mod search;
 pub mod storage;
 
 use std::sync::Arc;
@@ -38,6 +39,7 @@ use crate::media::FfmpegMediaProcessor;
 use crate::pipeline::jobs::JobId;
 use crate::pipeline::{JobRegistry, MeetingInput, Orchestrator};
 use crate::renderer::markdown;
+use crate::search::{qa, SearchIndex};
 use crate::storage::{SqliteStore, Store};
 
 /// Capacity of the per-engine event broadcast buffer.
@@ -52,6 +54,7 @@ pub struct Engine {
     store: Arc<dyn Store>,
     llm: Arc<dyn LlmProvider>,
     ai: Arc<dyn AiAnalyzer>,
+    search: SearchIndex,
     jobs: JobRegistry,
     orchestrator: Orchestrator,
     events: broadcast::Sender<Event>,
@@ -65,6 +68,7 @@ impl Engine {
     pub fn new(config: Config) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&config.data_dir)?;
         let store: Arc<dyn Store> = Arc::new(SqliteStore::open(config.database_path())?);
+        let search = SearchIndex::open(config.search_index_path())?;
         let llm: Arc<dyn LlmProvider> = Arc::new(OllamaProvider::new(&config.ollama)?);
 
         let media = Arc::new(FfmpegMediaProcessor::new());
@@ -88,6 +92,7 @@ impl Engine {
             store,
             llm,
             ai,
+            search,
             jobs,
             orchestrator,
             events,
@@ -127,6 +132,15 @@ impl Engine {
             Request::GetMeeting { meeting_id } => self.get_meeting(&meeting_id).await,
             Request::GetTranscript { meeting_id } => self.get_transcript(&meeting_id).await,
             Request::GetMom { meeting_id } => self.get_mom(&meeting_id).await,
+            Request::Search {
+                query,
+                vault_path,
+                limit,
+            } => self.search_vault(&query, &vault_path, limit).await,
+            Request::Ask {
+                question,
+                vault_path,
+            } => self.ask_vault(&question, &vault_path).await,
         }
     }
 
@@ -204,6 +218,36 @@ impl Engine {
                 message: e.to_string(),
             },
         }
+    }
+
+    /// Keep the index fresh, then full-text search the vault. A stale-sync failure is non-fatal:
+    /// we still search whatever is already indexed rather than refusing the request.
+    async fn search_vault(&self, query: &str, vault_path: &str, limit: Option<usize>) -> Response {
+        if let Err(e) = self.search.sync_vault(vault_path.into()).await {
+            tracing::warn!("vault sync failed before search: {e}");
+        }
+        match self.search.search(query, limit.unwrap_or(20)).await {
+            Ok(hits) => Response::SearchResults(hits),
+            Err(e) => Response::Error {
+                message: e.to_string(),
+            },
+        }
+    }
+
+    /// Answer a question grounded in the vault. Never hard-fails: retrieval falls back to an empty
+    /// set and [`qa::answer`] itself degrades to a source list if the LLM is unavailable, so Ask
+    /// always returns something useful (see the "AI failure ≠ data loss" reliability rule).
+    async fn ask_vault(&self, question: &str, vault_path: &str) -> Response {
+        if let Err(e) = self.search.sync_vault(vault_path.into()).await {
+            tracing::warn!("vault sync failed before ask: {e}");
+        }
+        let passages = self
+            .search
+            .retrieve(question, qa::DEFAULT_TOP_K)
+            .await
+            .unwrap_or_default();
+        let answer = qa::answer(question, &passages, self.llm.as_ref()).await;
+        Response::Answer(answer)
     }
 
     /// Analyze a transcript synchronously and return the meeting id. Used by the end-to-end

@@ -7,6 +7,7 @@
 
 pub mod action_item;
 pub mod decision;
+pub mod knowledge;
 pub mod meeting;
 pub mod meeting_ir;
 pub mod participant;
@@ -14,6 +15,7 @@ pub mod transcript;
 
 pub use action_item::{ActionItem, ActionStatus};
 pub use decision::Decision;
+pub use knowledge::{AskAnswer, Citation, SearchHit};
 pub use meeting::{Meeting, MeetingId};
 pub use meeting_ir::{Evidence, MeetingIr, OpenQuestion, Risk, Topic};
 pub use participant::Participant;

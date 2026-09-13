@@ -7,7 +7,7 @@ import 'package:notely_desktop/ipc/protocol.dart';
 void main() {
   test('protocol version matches the engine contract', () {
     // Must be bumped in lockstep with PROTOCOL_VERSION in engine/src/ipc/protocol.rs.
-    expect(protocolVersion, 1);
+    expect(protocolVersion, 2);
   });
 
   group('requests serialize to the tagged wire shape', () {
@@ -78,6 +78,28 @@ void main() {
         },
       });
     });
+
+    test('Search carries query, vault_path, and optional limit', () {
+      expect(
+        const Search(query: 'postgres', vaultPath: '/vault', limit: 5).toJson(),
+        {
+          'type': 'Search',
+          'params': {'query': 'postgres', 'vault_path': '/vault', 'limit': 5},
+        },
+      );
+      // limit is omitted when null so the engine applies its default.
+      expect(const Search(query: 'q', vaultPath: '/v').toJson(), {
+        'type': 'Search',
+        'params': {'query': 'q', 'vault_path': '/v'},
+      });
+    });
+
+    test('Ask carries question and vault_path', () {
+      expect(const Ask(question: 'what db?', vaultPath: '/vault').toJson(), {
+        'type': 'Ask',
+        'params': {'question': 'what db?', 'vault_path': '/vault'},
+      });
+    });
   });
 
   group('responses decode from the {type, data} shape', () {
@@ -138,6 +160,48 @@ void main() {
         'data': {'message': 'boom'},
       });
       expect((r as ErrorResponse).message, 'boom');
+    });
+
+    test('SearchResults decodes a list of hits', () {
+      final r = Response.fromJson({
+        'type': 'SearchResults',
+        'data': [
+          {
+            'path': '/vault/arch.md',
+            'title': 'Architecture',
+            'start_line': 2,
+            'end_line': 4,
+            'snippet': 'We chose PostgreSQL…',
+          },
+        ],
+      });
+      final hits = (r as SearchResultsResponse).hits;
+      expect(hits.single.path, '/vault/arch.md');
+      expect(hits.single.title, 'Architecture');
+      expect(hits.single.startLine, 2);
+      expect(hits.single.endLine, 4);
+    });
+
+    test('Answer decodes text, files_read, and citations', () {
+      final r = Response.fromJson({
+        'type': 'Answer',
+        'data': {
+          'text': 'PostgreSQL was chosen [1].',
+          'files_read': ['/vault/arch.md'],
+          'citations': [
+            {
+              'path': '/vault/arch.md',
+              'start_line': 2,
+              'end_line': 4,
+              'snippet': 'We chose PostgreSQL…',
+            },
+          ],
+        },
+      });
+      final a = (r as AnswerResponse).answer;
+      expect(a.text, 'PostgreSQL was chosen [1].');
+      expect(a.filesRead, ['/vault/arch.md']);
+      expect(a.citations.single.startLine, 2);
     });
 
     test('unknown response type throws ProtocolException', () {
