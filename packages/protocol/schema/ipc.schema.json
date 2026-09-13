@@ -2,43 +2,137 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://notely.ai/schema/ipc.schema.json",
   "title": "Notely IPC protocol",
-  "description": "Canonical, language-neutral schema for the Flutter <-> Rust IPC contract. Mirrored by engine/src/ipc and apps/desktop/lib/ipc. See packages/protocol/README.md.",
+  "description": "Canonical, language-neutral schema for the Flutter <-> Rust IPC contract. Mirrored by engine/src/ipc (the source of truth) and apps/desktop/lib/ipc. See packages/protocol/README.md. Transport: newline-delimited JSON over a loopback TCP socket (default 127.0.0.1:8765). Requests are wrapped in a RequestEnvelope { protocol_version, request_id, ...Request }; responses in a ResponseEnvelope { protocol_version, request_id, ...Response }; events in an EventEnvelope { protocol_version, event: Event }.",
   "protocolVersion": 1,
   "definitions": {
-    "Request": {
-      "description": "Flutter -> Engine commands. Tagged by `type` with a `params` object.",
+    "ProcessInput": {
+      "description": "What to process into a meeting. Tagged by `kind`.",
       "oneOf": [
-        { "properties": { "type": { "const": "StartMeeting" }, "params": { "properties": { "title": { "type": ["string", "null"] } } } } },
-        { "properties": { "type": { "const": "ImportMeeting" }, "params": { "properties": { "source_path": { "type": "string" } }, "required": ["source_path"] } } },
-        { "properties": { "type": { "const": "GetMeeting" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } } },
-        { "properties": { "type": { "const": "GetTranscript" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } } },
-        { "properties": { "type": { "const": "GetMom" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } } },
-        { "properties": { "type": { "const": "CancelJob" }, "params": { "properties": { "job_id": { "type": "string" } }, "required": ["job_id"] } } }
+        { "properties": { "kind": { "const": "transcript" }, "title": { "type": ["string", "null"] }, "transcript": { "$ref": "#/definitions/Transcript" } }, "required": ["kind", "transcript"] },
+        { "properties": { "kind": { "const": "audio" }, "title": { "type": ["string", "null"] }, "path": { "type": "string" } }, "required": ["kind", "path"] }
+      ]
+    },
+    "Request": {
+      "description": "Flutter -> Engine commands. Tagged by `type`; variants with data carry a `params` object (unit variants like Health carry no `params`).",
+      "oneOf": [
+        { "properties": { "type": { "const": "Health" } }, "required": ["type"] },
+        { "properties": { "type": { "const": "ProcessMeeting" }, "params": { "properties": { "input": { "$ref": "#/definitions/ProcessInput" } }, "required": ["input"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "GetJob" }, "params": { "properties": { "job_id": { "type": "string" } }, "required": ["job_id"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "CancelJob" }, "params": { "properties": { "job_id": { "type": "string" } }, "required": ["job_id"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "GetMeeting" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "GetTranscript" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "GetMom" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] }
       ]
     },
     "Response": {
-      "description": "Immediate engine response. Long work continues via Event.",
+      "description": "Immediate engine response. Tagged by `type` with a `data` payload. Long work continues via Event.",
       "oneOf": [
-        { "properties": { "type": { "const": "JobAccepted" }, "data": { "properties": { "job_id": { "type": "string" } }, "required": ["job_id"] } } },
-        { "properties": { "type": { "const": "Data" }, "data": { "properties": { "json": {} } } } },
-        { "properties": { "type": { "const": "Error" }, "data": { "properties": { "message": { "type": "string" } }, "required": ["message"] } } }
+        { "properties": { "type": { "const": "Health" }, "data": { "$ref": "#/definitions/HealthInfo" } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "JobAccepted" }, "data": { "properties": { "job_id": { "type": "string" } }, "required": ["job_id"] } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "Job" }, "data": { "$ref": "#/definitions/Job" } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "Meeting" }, "data": { "$ref": "#/definitions/Meeting" } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "Transcript" }, "data": { "$ref": "#/definitions/Transcript" } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "Mom" }, "data": { "properties": { "markdown": { "type": "string" } }, "required": ["markdown"] } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "Error" }, "data": { "properties": { "message": { "type": "string" } }, "required": ["message"] } }, "required": ["type", "data"] }
       ]
     },
     "Event": {
-      "description": "Engine -> Flutter async job progress/lifecycle events.",
+      "description": "Engine -> Flutter async job progress/lifecycle events. Tagged by `type` with a `data` payload that always includes `job_id`.",
       "properties": {
         "type": {
           "enum": [
             "JobCreated",
+            "ProcessingStarted",
+            "MediaProcessingStarted",
+            "MediaProcessingCompleted",
             "TranscriptionStarted",
             "TranscriptionProgress",
-            "AnalysisStarted",
-            "MomGenerated",
+            "TranscriptionCompleted",
+            "ChunkingStarted",
+            "ChunkingCompleted",
+            "ExtractionStarted",
+            "ExtractionProgress",
+            "ExtractionCompleted",
+            "SynthesisStarted",
+            "SynthesisCompleted",
+            "ValidationStarted",
+            "ValidationCompleted",
+            "RenderingStarted",
+            "RenderingCompleted",
             "JobCompleted",
             "JobFailed"
           ]
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "job_id": { "type": "string" },
+            "meeting_id": { "type": "string" },
+            "progress": { "type": "number" },
+            "completed": { "type": "integer" },
+            "total": { "type": "integer" },
+            "chunk_count": { "type": "integer" },
+            "message": { "type": "string" }
+          },
+          "required": ["job_id"]
         }
-      }
+      },
+      "required": ["type", "data"]
+    },
+    "HealthInfo": {
+      "properties": {
+        "protocol_version": { "type": "integer" },
+        "engine_ok": { "type": "boolean" },
+        "llm_ok": { "type": "boolean" },
+        "model": { "type": "string" },
+        "asr_provider": { "type": "string" }
+      },
+      "required": ["protocol_version", "engine_ok", "llm_ok", "model", "asr_provider"]
+    },
+    "Job": {
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "enum": ["queued", "running", "completed", "failed", "cancelled"] },
+        "stage": { "enum": ["created", "media_processing", "transcription", "chunking", "extraction", "synthesis", "validation", "rendering", "storing", "done"] },
+        "meeting_id": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "required": ["id", "status", "stage"]
+    },
+    "Meeting": {
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "participants": { "type": "array", "items": { "$ref": "#/definitions/Participant" } },
+        "duration_seconds": { "type": "number" }
+      },
+      "required": ["id", "title", "created_at"]
+    },
+    "Participant": {
+      "properties": {
+        "id": { "type": "string" },
+        "display_name": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "Transcript": {
+      "properties": {
+        "segments": { "type": "array", "items": { "$ref": "#/definitions/TranscriptSegment" } }
+      },
+      "required": ["segments"]
+    },
+    "TranscriptSegment": {
+      "properties": {
+        "speaker_id": { "type": "string" },
+        "start": { "type": "number" },
+        "end": { "type": "number" },
+        "text": { "type": "string" },
+        "language": { "type": "string" },
+        "confidence": { "type": "number" }
+      },
+      "required": ["start", "end", "text"]
     }
   }
 }

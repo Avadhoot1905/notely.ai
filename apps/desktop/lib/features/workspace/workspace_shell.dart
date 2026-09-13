@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 
 import '../../app/app_scope.dart';
 import '../../app/theme.dart';
+import '../../ipc/engine_client.dart';
 import '../ask/ask_button.dart';
 import '../ask/ask_panel.dart';
 import '../editor/editor_state.dart';
@@ -19,6 +20,7 @@ import '../editor/markdown_editor.dart';
 import '../explorer/explorer_state.dart';
 import '../explorer/file_tree.dart';
 import '../listening/listening_button.dart';
+import '../listening/listening_state.dart';
 import '../listening/transcript_panel.dart';
 import '../stash/stash_switcher.dart';
 
@@ -125,6 +127,7 @@ class _ErrorListener extends StatefulWidget {
 class _ErrorListenerState extends State<_ErrorListener> {
   ExplorerController? _explorer;
   EditorController? _editor;
+  ListeningController? _listening;
 
   @override
   void didChangeDependencies() {
@@ -138,10 +141,15 @@ class _ErrorListenerState extends State<_ErrorListener> {
       _editor?.removeListener(_check);
       _editor = scope.editor..addListener(_check);
     }
+    if (_listening != scope.listening) {
+      _listening?.removeListener(_check);
+      _listening = scope.listening..addListener(_check);
+    }
   }
 
   void _check() {
-    final message = _explorer?.error ?? _editor?.error;
+    final message =
+        _explorer?.error ?? _editor?.error ?? _listening?.summariseError;
     if (message == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -166,6 +174,7 @@ class _ErrorListenerState extends State<_ErrorListener> {
         );
       _explorer?.clearError();
       _editor?.clearError();
+      _listening?.clearSummariseError();
     });
   }
 
@@ -173,6 +182,7 @@ class _ErrorListenerState extends State<_ErrorListener> {
   void dispose() {
     _explorer?.removeListener(_check);
     _editor?.removeListener(_check);
+    _listening?.removeListener(_check);
     super.dispose();
   }
 
@@ -617,6 +627,10 @@ class _StatusBar extends StatelessWidget {
             },
           ),
           const Spacer(),
+          const _EngineStatus(),
+          const SizedBox(width: 14),
+          _Dot(t),
+          const SizedBox(width: 14),
           _item(t, 'Markdown'),
           const SizedBox(width: 14),
           _Dot(t),
@@ -641,6 +655,59 @@ class _StatusBar extends StatelessWidget {
 
   Widget _item(NotelyTokens t, String text) =>
       Text(text, style: TextStyle(fontSize: 11, color: t.textFaint));
+}
+
+/// Compact engine connection indicator: a colored dot + label with a descriptive tooltip.
+/// Reflects the live [EngineClient] state so the user always knows whether the backend is
+/// reachable, connecting, off, or incompatible.
+class _EngineStatus extends StatelessWidget {
+  const _EngineStatus();
+
+  @override
+  Widget build(BuildContext context) {
+    final engine = AppScope.of(context).engine;
+    final t = context.tokens;
+    return ValueListenableBuilder<EngineConnectionState>(
+      valueListenable: engine.state,
+      builder: (context, state, _) {
+        final (Color color, String label) = switch (state) {
+          EngineConnectionState.connected => (t.success, 'Engine'),
+          EngineConnectionState.connecting => (t.warning, 'Engine…'),
+          EngineConnectionState.incompatible => (t.danger, 'Engine ✗'),
+          EngineConnectionState.disconnected => (t.textFaint, 'Engine off'),
+        };
+        final health = engine.health.value;
+        final tip = switch (state) {
+          EngineConnectionState.connected =>
+            health == null
+                ? 'Connected to the local engine'
+                : 'Connected · model ${health.model} · '
+                      'LLM ${health.llmOk ? 'ready' : 'offline'}',
+          EngineConnectionState.connecting => 'Connecting to the local engine…',
+          EngineConnectionState.incompatible =>
+            engine.lastError.value ?? 'Incompatible engine protocol version',
+          EngineConnectionState.disconnected =>
+            engine.lastError.value ??
+                'Engine not running — start it with scripts/start-engine.sh',
+        };
+        return Tooltip(
+          message: tip,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 5,
+                height: 5,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Text(label, style: TextStyle(fontSize: 11, color: t.textFaint)),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _VerticalDivider extends StatelessWidget {

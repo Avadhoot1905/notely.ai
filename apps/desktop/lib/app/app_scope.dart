@@ -12,6 +12,7 @@ import '../features/explorer/explorer_state.dart';
 import '../features/listening/listening_state.dart';
 import '../features/meetings/meeting_session_manager.dart';
 import '../features/stash/stash_state.dart';
+import '../ipc/engine_client.dart';
 import 'theme_controller.dart';
 
 class AppScope extends InheritedWidget {
@@ -24,6 +25,7 @@ class AppScope extends InheritedWidget {
     required this.theme,
     required this.ask,
     required this.meetings,
+    required this.engine,
     required super.child,
   });
 
@@ -34,6 +36,10 @@ class AppScope extends InheritedWidget {
   final ThemeController theme;
   final AskController ask;
   final MeetingSessionManager meetings;
+
+  /// The single IPC boundary to the Rust engine. Widgets observe [EngineClient.state] for the
+  /// connection indicator; features go through it (never around it) to reach the backend.
+  final EngineClient engine;
 
   static AppScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppScope>();
@@ -49,5 +55,6 @@ class AppScope extends InheritedWidget {
       listening != oldWidget.listening ||
       theme != oldWidget.theme ||
       ask != oldWidget.ask ||
-      meetings != oldWidget.meetings;
+      meetings != oldWidget.meetings ||
+      engine != oldWidget.engine;
 }

@@ -17,7 +17,7 @@ void main() {
     // Start from a clean slate so a previously persisted stash doesn't skip the picker.
     SharedPreferences.setMockInitialValues({});
 
-    await tester.pumpWidget(const NotelyApp());
+    await tester.pumpWidget(const NotelyApp(autoConnectEngine: false));
     await tester.pumpAndSettle();
 
     expect(find.text('Open a Stash'), findsOneWidget);

@@ -51,6 +51,7 @@ class ListeningController extends ChangeNotifier {
   ListeningState _state = ListeningState.idle;
   MeetingSession? _session;
   bool _summarising = false;
+  String? _summariseError;
 
   // Elapsed-capture accounting: accumulated time from finished listening spans, plus the span
   // in progress since [_runningSince]. Pausing folds the current span in; resuming reopens one.
@@ -80,6 +81,15 @@ class ListeningController extends ChangeNotifier {
   /// The transcript panel is shown for any non-idle state.
   bool get showTranscript => _state != ListeningState.idle;
   bool get isSummarising => _summarising;
+
+  /// Last summarisation failure (e.g. the engine errored or timed out), or null. The UI reads
+  /// this to surface a backend error without the session crashing. Cleared on the next attempt.
+  String? get summariseError => _summariseError;
+  void clearSummariseError() {
+    if (_summariseError == null) return;
+    _summariseError = null;
+    notifyListeners();
+  }
 
   List<TranscriptEntry> get entries =>
       List.unmodifiable(_session?.segments ?? const []);
@@ -155,6 +165,7 @@ class ListeningController extends ChangeNotifier {
     if (!editor.hasOpenNote) return false;
 
     _summarising = true;
+    _summariseError = null;
     notifyListeners();
     try {
       final markdown = await _summary.summarise(
@@ -163,11 +174,24 @@ class ListeningController extends ChangeNotifier {
         title: null,
       );
       await editor.setContent(markdown);
-    } finally {
+    } catch (e) {
+      // Surface the failure and stay in Review so the user can retry (or Close). We never fake a
+      // successful summary when the backend errors.
+      _summariseError = _describeError(e);
       _summarising = false;
+      notifyListeners();
+      return false;
     }
+    _summarising = false;
     _endSession();
     return true;
+  }
+
+  static String _describeError(Object e) {
+    if (e is TimeoutException) {
+      return 'The engine took too long to summarise this meeting.';
+    }
+    return 'Summarise failed: $e';
   }
 
   /// Discard the review and return to the normal workspace (file untouched).

@@ -23,7 +23,7 @@ void main() {
   ) async {
     SharedPreferences.setMockInitialValues({});
     desktopSize(tester);
-    await tester.pumpWidget(const NotelyApp());
+    await tester.pumpWidget(const NotelyApp(autoConnectEngine: false));
     await tester.pumpAndSettle();
 
     // The two-pane launch modal: identity + create/open actions.
@@ -38,7 +38,7 @@ void main() {
   ) async {
     SharedPreferences.setMockInitialValues({'notely.theme.mode': 'light'});
     desktopSize(tester);
-    await tester.pumpWidget(const NotelyApp());
+    await tester.pumpWidget(const NotelyApp(autoConnectEngine: false));
     await tester.pumpAndSettle();
 
     // Real screen renders under the light theme with no exceptions/overflow.

@@ -5,6 +5,8 @@
 // `features/`. Controllers are wired to real services (filesystem, audio, transcript,
 // summary); the Rust engine (`lib/ipc`) is still the intended future home for ASR/summarise.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../features/ask/ask_state.dart';
@@ -15,8 +17,10 @@ import '../features/meetings/meeting_session_manager.dart';
 import '../features/stash/stash_picker.dart';
 import '../features/stash/stash_state.dart';
 import '../features/workspace/workspace_shell.dart';
+import '../ipc/engine_client.dart';
 import '../services/companion/companion_window_service.dart';
 import '../services/filesystem/file_watcher_service.dart';
+import '../services/meeting/engine_summary_service.dart';
 import '../services/meetings/meeting_detector.dart';
 import '../services/meetings/meeting_settings.dart';
 import '../services/notifications/notification_service.dart';
@@ -27,19 +31,34 @@ import 'theme.dart';
 import 'theme_controller.dart';
 
 class NotelyApp extends StatefulWidget {
-  const NotelyApp({super.key});
+  const NotelyApp({super.key, this.engine, this.autoConnectEngine = true});
+
+  /// Optional injected engine client (tests supply their own). When null, the app owns one.
+  final EngineClient? engine;
+
+  /// Whether to start the IPC connect loop on launch. Disabled by widget tests so they don't
+  /// open real sockets/timers.
+  final bool autoConnectEngine;
 
   @override
   State<NotelyApp> createState() => _NotelyAppState();
 }
 
 class _NotelyAppState extends State<NotelyApp> {
+  // The single IPC boundary to the Rust engine. Owned by the app runtime and connected for the
+  // whole session; features reach the backend only through it.
+  late final EngineClient _engine = widget.engine ?? EngineClient();
+
   late final StashController _stash = StashController();
   late final ExplorerController _explorer = ExplorerController(
     watcher: const IoFileWatcherService(),
   );
   late final EditorController _editor = EditorController();
-  late final ListeningController _listening = ListeningController();
+  // Summarisation is a real backend feature (transcript → MOM). Route it through the engine,
+  // falling back to a deterministic offline summary only when the engine is unreachable.
+  late final ListeningController _listening = ListeningController(
+    summary: EngineSummaryService(client: _engine),
+  );
   late final ThemeController _theme = ThemeController();
   late final AskController _ask = AskController();
 
@@ -73,6 +92,9 @@ class _NotelyAppState extends State<NotelyApp> {
     _stash.restore();
     _theme.restore();
     _ask.restore();
+    // Begin connecting to the engine. The client reconnects with capped backoff, so the app is
+    // usable (and shows connection state) whether or not the engine is running yet.
+    if (widget.autoConnectEngine) _engine.start();
     _startMeetingRuntime();
   }
 
@@ -112,6 +134,7 @@ class _NotelyAppState extends State<NotelyApp> {
     _detector.dispose();
     _notifications.dispose();
     _companion.dispose();
+    unawaited(_engine.dispose());
     super.dispose();
   }
 
@@ -133,6 +156,7 @@ class _NotelyAppState extends State<NotelyApp> {
           theme: _theme,
           ask: _ask,
           meetings: _meetings,
+          engine: _engine,
           child: const _AppGate(),
         ),
       ),
