@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 
 use crate::config::OllamaConfig;
 
-use super::provider::{GenerateRequest, GenerateResponse, LlmError, LlmProvider};
+use super::provider::{
+    EmbedRequest, EmbedResponse, GenerateRequest, GenerateResponse, LlmError, LlmProvider,
+};
 
 /// Talks to a local Ollama instance.
 pub struct OllamaProvider {
@@ -46,6 +48,25 @@ struct OllamaGenerateResponse {
     model: String,
     #[serde(default)]
     error: Option<String>,
+}
+
+/// Ollama's `/api/embed` response. `embeddings` is one vector per input.
+#[derive(Debug, Deserialize)]
+struct OllamaEmbedResponse {
+    #[serde(default)]
+    embeddings: Vec<Vec<f32>>,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+/// Construct the JSON body for `/api/embed`. Pure and deterministic — unit-tested below.
+pub fn build_embed_body(model: &str, input: &[String]) -> Value {
+    json!({
+        "model": model,
+        "input": input,
+    })
 }
 
 /// Construct the JSON body for `/api/generate`. Pure and deterministic — unit-tested below.
@@ -135,6 +156,53 @@ impl LlmProvider for OllamaProvider {
             Err(LlmError::Runtime(format!("HTTP {}", resp.status())))
         }
     }
+
+    async fn embed(&self, request: EmbedRequest) -> Result<EmbedResponse, LlmError> {
+        if request.input.is_empty() {
+            return Ok(EmbedResponse {
+                vectors: Vec::new(),
+                model: request.model.unwrap_or_else(|| self.default_model.clone()),
+            });
+        }
+        let model = request
+            .model
+            .clone()
+            .unwrap_or_else(|| self.default_model.clone());
+        let body = build_embed_body(&model, &request.input);
+        let url = format!("{}/api/embed", self.base_url);
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| LlmError::Transport(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(LlmError::Runtime(format!("HTTP {status}: {text}")));
+        }
+
+        let parsed: OllamaEmbedResponse = resp
+            .json()
+            .await
+            .map_err(|e| LlmError::Decode(e.to_string()))?;
+
+        if let Some(err) = parsed.error {
+            return Err(LlmError::Runtime(err));
+        }
+
+        Ok(EmbedResponse {
+            vectors: parsed.embeddings,
+            model: if parsed.model.is_empty() {
+                model
+            } else {
+                parsed.model
+            },
+        })
+    }
 }
 
 #[cfg(test)]
@@ -167,5 +235,13 @@ mod tests {
         assert_eq!(body["format"], schema);
         let temp = body["options"]["temperature"].as_f64().unwrap();
         assert!((temp - 0.2).abs() < 1e-6, "temperature was {temp}");
+    }
+
+    #[test]
+    fn embed_body_carries_model_and_batch_input() {
+        let body = build_embed_body("nomic-embed-text", &["a".into(), "b".into()]);
+        assert_eq!(body["model"], "nomic-embed-text");
+        assert_eq!(body["input"][0], "a");
+        assert_eq!(body["input"][1], "b");
     }
 }

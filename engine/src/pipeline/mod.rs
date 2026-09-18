@@ -9,8 +9,10 @@
 //!
 //! See `docs/pipeline.md`.
 
+pub mod job_store;
 pub mod jobs;
 pub mod orchestrator;
 
-pub use jobs::{CancelFlag, Job, JobId, JobRegistry, JobStage, JobStatus};
+pub use job_store::{JobStore, JobStoreError};
+pub use jobs::{CancelFlag, Job, JobId, JobKind, JobRegistry, JobStage, JobStatus};
 pub use orchestrator::{EventSink, MeetingInput, Orchestrator, PipelineError};

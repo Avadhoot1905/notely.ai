@@ -15,6 +15,9 @@ use std::time::Duration;
 
 /// Environment variable names (documented in one place).
 pub mod env_vars {
+    // LLM runtime selection. `ollama` (default, cross-platform) | `mlx` (Apple Silicon).
+    pub const LLM_PROVIDER: &str = "NOTELY_LLM_PROVIDER";
+
     // LLM (Ollama).
     pub const OLLAMA_URL: &str = "NOTELY_OLLAMA_URL";
     /// Preferred name for the LLM model tag.
@@ -22,6 +25,18 @@ pub mod env_vars {
     /// Legacy alias for [`LLM_MODEL`], still honored.
     pub const OLLAMA_MODEL: &str = "NOTELY_OLLAMA_MODEL";
     pub const OLLAMA_TIMEOUT_SECS: &str = "NOTELY_OLLAMA_TIMEOUT_SECS";
+
+    // MLX (optional Apple-Silicon runtime; an external MLX-LM HTTP server).
+    pub const MLX_URL: &str = "NOTELY_MLX_URL";
+    pub const MLX_MODEL: &str = "NOTELY_MLX_MODEL";
+    pub const MLX_TIMEOUT_SECS: &str = "NOTELY_MLX_TIMEOUT_SECS";
+
+    // Optional per-task model routing. Each falls back to the runtime's default model when unset.
+    pub const LLM_MODEL_EXTRACTION: &str = "NOTELY_LLM_MODEL_EXTRACTION";
+    pub const LLM_MODEL_SYNTHESIS: &str = "NOTELY_LLM_MODEL_SYNTHESIS";
+    pub const LLM_MODEL_QA: &str = "NOTELY_LLM_MODEL_QA";
+    /// Setting this turns on embeddings/hybrid search. Unset => FTS5-only (unchanged behavior).
+    pub const LLM_MODEL_EMBEDDING: &str = "NOTELY_LLM_MODEL_EMBEDDING";
 
     // ASR (separate runtime).
     pub const ASR_PROVIDER: &str = "NOTELY_ASR_PROVIDER";
@@ -33,6 +48,56 @@ pub mod env_vars {
     pub const DATA_DIR: &str = "NOTELY_DATA_DIR";
     pub const LOG_LEVEL: &str = "NOTELY_LOG_LEVEL";
     pub const IPC_ADDR: &str = "NOTELY_IPC_ADDR";
+}
+
+/// Which LLM runtime the engine talks to. All are reached through the same `LlmProvider` boundary,
+/// so the rest of the engine is identical regardless of choice. A future GPU runtime (e.g. vLLM)
+/// would slot in here as another variant without touching the pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LlmProviderKind {
+    /// Ollama (default). Cross-platform; uses CUDA automatically on NVIDIA, Metal on macOS, CPU otherwise.
+    Ollama,
+    /// MLX-LM served by a separate local HTTP server (Apple Silicon). Opt-in.
+    Mlx,
+}
+
+impl LlmProviderKind {
+    fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "ollama" => Some(Self::Ollama),
+            "mlx" | "mlx-lm" | "mlx_lm" => Some(Self::Mlx),
+            _ => None,
+        }
+    }
+}
+
+/// Configuration for reaching an external MLX-LM HTTP server (OpenAI-compatible API).
+#[derive(Debug, Clone)]
+pub struct MlxConfig {
+    pub base_url: String,
+    pub model: String,
+    pub timeout: Duration,
+}
+
+impl Default for MlxConfig {
+    fn default() -> Self {
+        Self {
+            // `mlx_lm.server` default port.
+            base_url: "http://localhost:8080".to_string(),
+            model: DEFAULT_LLM_MODEL.to_string(),
+            timeout: Duration::from_secs(180),
+        }
+    }
+}
+
+/// Optional per-task model overrides. `None` preserves the current default-model behavior for that
+/// task. `embedding` doubles as the on/off switch for hybrid search.
+#[derive(Debug, Clone, Default)]
+pub struct ModelRoutes {
+    pub extraction: Option<String>,
+    pub synthesis: Option<String>,
+    pub qa: Option<String>,
+    pub embedding: Option<String>,
 }
 
 /// The default LLM model tag (Qwen3 1.7B). Small enough for a dev laptop; configurable so 0.6B/4B
@@ -124,7 +189,12 @@ impl Default for ChunkingConfig {
 /// Full engine configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Which LLM runtime to use (Ollama by default).
+    pub llm_provider: LlmProviderKind,
     pub ollama: OllamaConfig,
+    pub mlx: MlxConfig,
+    /// Optional per-task model routing (extraction/synthesis/qa/embedding).
+    pub models: ModelRoutes,
     pub asr: AsrConfig,
     pub chunking: ChunkingConfig,
     /// Directory for the local database and generated artifacts (outside the repo).
@@ -138,7 +208,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            llm_provider: LlmProviderKind::Ollama,
             ollama: OllamaConfig::default(),
+            mlx: MlxConfig::default(),
+            models: ModelRoutes::default(),
             asr: AsrConfig::default(),
             chunking: ChunkingConfig::default(),
             data_dir: default_data_dir(),
@@ -153,19 +226,45 @@ impl Config {
     pub fn from_env() -> Self {
         let mut cfg = Config::default();
 
+        // LLM runtime selection.
+        if let Ok(v) = std::env::var(env_vars::LLM_PROVIDER) {
+            if let Some(kind) = LlmProviderKind::parse(&v) {
+                cfg.llm_provider = kind;
+            }
+        }
+
         // LLM (Ollama).
         if let Ok(v) = std::env::var(env_vars::OLLAMA_URL) {
             cfg.ollama.base_url = v;
         }
-        // Preferred NOTELY_LLM_MODEL, falling back to the legacy NOTELY_OLLAMA_MODEL.
+        // Preferred NOTELY_LLM_MODEL, falling back to the legacy NOTELY_OLLAMA_MODEL. Also seeds the
+        // MLX default model so a single knob works regardless of the selected runtime.
         if let Ok(v) =
             std::env::var(env_vars::LLM_MODEL).or_else(|_| std::env::var(env_vars::OLLAMA_MODEL))
         {
-            cfg.ollama.model = v;
+            cfg.ollama.model = v.clone();
+            cfg.mlx.model = v;
         }
         if let Some(d) = env_secs(env_vars::OLLAMA_TIMEOUT_SECS) {
             cfg.ollama.timeout = d;
         }
+
+        // MLX (optional Apple-Silicon runtime).
+        if let Ok(v) = std::env::var(env_vars::MLX_URL) {
+            cfg.mlx.base_url = v;
+        }
+        if let Ok(v) = std::env::var(env_vars::MLX_MODEL) {
+            cfg.mlx.model = v;
+        }
+        if let Some(d) = env_secs(env_vars::MLX_TIMEOUT_SECS) {
+            cfg.mlx.timeout = d;
+        }
+
+        // Per-task model routing (all optional; unset preserves default-model behavior).
+        cfg.models.extraction = std::env::var(env_vars::LLM_MODEL_EXTRACTION).ok();
+        cfg.models.synthesis = std::env::var(env_vars::LLM_MODEL_SYNTHESIS).ok();
+        cfg.models.qa = std::env::var(env_vars::LLM_MODEL_QA).ok();
+        cfg.models.embedding = std::env::var(env_vars::LLM_MODEL_EMBEDDING).ok();
 
         // ASR (separate runtime).
         if let Ok(v) = std::env::var(env_vars::ASR_PROVIDER) {
@@ -207,6 +306,24 @@ impl Config {
     /// is rebuildable data (losing it costs only a re-sync), not a source of truth.
     pub fn search_index_path(&self) -> PathBuf {
         self.data_dir.join("search.db")
+    }
+
+    /// Path to the persistent job queue. Operational metadata; kept separate from the meeting store.
+    pub fn jobs_path(&self) -> PathBuf {
+        self.data_dir.join("jobs.db")
+    }
+
+    /// Path to the LLM result cache. Purely a speed-up; rebuildable, so it lives on its own.
+    pub fn llm_cache_path(&self) -> PathBuf {
+        self.data_dir.join("llm_cache.db")
+    }
+
+    /// The default model tag of the currently selected LLM runtime.
+    pub fn active_model(&self) -> &str {
+        match self.llm_provider {
+            LlmProviderKind::Ollama => &self.ollama.model,
+            LlmProviderKind::Mlx => &self.mlx.model,
+        }
     }
 }
 
@@ -250,6 +367,46 @@ mod tests {
         assert_eq!(cfg.asr.provider, AsrProviderKind::Qwen3Asr);
         // ASR runtime is NOT the Ollama runtime.
         assert_ne!(cfg.asr.base_url, cfg.ollama.base_url);
+    }
+
+    #[test]
+    fn parses_llm_provider_kinds_and_defaults_to_ollama() {
+        assert_eq!(Config::default().llm_provider, LlmProviderKind::Ollama);
+        assert_eq!(
+            LlmProviderKind::parse("ollama"),
+            Some(LlmProviderKind::Ollama)
+        );
+        assert_eq!(LlmProviderKind::parse("MLX"), Some(LlmProviderKind::Mlx));
+        assert_eq!(LlmProviderKind::parse("mlx-lm"), Some(LlmProviderKind::Mlx));
+        assert_eq!(LlmProviderKind::parse("nope"), None);
+    }
+
+    #[test]
+    fn active_model_follows_selected_runtime() {
+        let mut cfg = Config {
+            ollama: OllamaConfig {
+                model: "qwen3:1.7b".into(),
+                ..OllamaConfig::default()
+            },
+            mlx: MlxConfig {
+                model: "qwen3-mlx".into(),
+                ..MlxConfig::default()
+            },
+            ..Config::default()
+        };
+        assert_eq!(cfg.active_model(), "qwen3:1.7b");
+        cfg.llm_provider = LlmProviderKind::Mlx;
+        assert_eq!(cfg.active_model(), "qwen3-mlx");
+    }
+
+    #[test]
+    fn model_routes_default_to_none() {
+        // Unset routing preserves default-model behavior for every task.
+        let routes = ModelRoutes::default();
+        assert!(routes.extraction.is_none());
+        assert!(routes.synthesis.is_none());
+        assert!(routes.qa.is_none());
+        assert!(routes.embedding.is_none());
     }
 
     #[test]

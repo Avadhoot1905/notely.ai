@@ -21,7 +21,14 @@ pub const DEFAULT_TOP_K: usize = 6;
 
 /// Answer `question` using only `passages`. Never fails: on an LLM error it returns a deterministic
 /// summary of the sources so the user still gets useful, cited results.
-pub async fn answer(question: &str, passages: &[Passage], llm: &dyn LlmProvider) -> AskAnswer {
+///
+/// `model` optionally routes generation to a QA-specific model; `None` uses the provider default.
+pub async fn answer(
+    question: &str,
+    passages: &[Passage],
+    llm: &dyn LlmProvider,
+    model: Option<&str>,
+) -> AskAnswer {
     let citations: Vec<Citation> = passages
         .iter()
         .map(|p| Citation {
@@ -45,9 +52,10 @@ pub async fn answer(question: &str, passages: &[Passage], llm: &dyn LlmProvider)
         };
     }
 
-    let request = GenerateRequest::new(build_prompt(question, passages))
+    let mut request = GenerateRequest::new(build_prompt(question, passages))
         .with_system(SYSTEM_PROMPT)
         .with_temperature(0.2);
+    request.model = model.map(|m| m.to_string());
 
     match llm.generate(request).await {
         Ok(resp) => {
@@ -197,14 +205,14 @@ mod tests {
 
     #[tokio::test]
     async fn empty_passages_reports_nothing_found_without_calling_llm() {
-        let ans = answer("database migration", &[], &EchoLlm).await;
+        let ans = answer("database migration", &[], &EchoLlm, None).await;
         assert!(ans.citations.is_empty());
         assert!(ans.text.contains("couldn't find"));
     }
 
     #[tokio::test]
     async fn llm_answer_is_cleaned_and_cited() {
-        let ans = answer("what db?", &[passage("/n/arch.md")], &EchoLlm).await;
+        let ans = answer("what db?", &[passage("/n/arch.md")], &EchoLlm, None).await;
         assert_eq!(ans.text, "PostgreSQL was chosen [1].");
         assert_eq!(ans.citations.len(), 1);
         assert_eq!(ans.files_read, vec!["/n/arch.md".to_string()]);
@@ -212,16 +220,43 @@ mod tests {
 
     #[tokio::test]
     async fn falls_back_to_source_list_when_llm_down() {
-        let ans = answer("what db?", &[passage("/n/arch.md")], &DownLlm).await;
+        let ans = answer("what db?", &[passage("/n/arch.md")], &DownLlm, None).await;
         assert!(ans.text.contains("[1]"));
         assert!(ans.text.contains("PostgreSQL"));
         assert_eq!(ans.citations.len(), 1);
     }
 
+    /// Records the model the request carried, to prove task-specific routing reaches the provider.
+    struct RecordingLlm {
+        seen_model: std::sync::Mutex<Option<String>>,
+    }
+    #[async_trait]
+    impl LlmProvider for RecordingLlm {
+        async fn generate(&self, r: GenerateRequest) -> Result<GenerateResponse, LlmError> {
+            *self.seen_model.lock().unwrap() = r.model.clone();
+            Ok(GenerateResponse {
+                text: "ok [1]".into(),
+                model: r.model.unwrap_or_default(),
+            })
+        }
+        async fn health(&self) -> Result<(), LlmError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn routes_configured_qa_model_to_the_provider() {
+        let llm = RecordingLlm {
+            seen_model: std::sync::Mutex::new(None),
+        };
+        let _ = answer("q?", &[passage("/n.md")], &llm, Some("qa-model")).await;
+        assert_eq!(llm.seen_model.lock().unwrap().as_deref(), Some("qa-model"));
+    }
+
     #[tokio::test]
     async fn files_read_dedupes_preserving_order() {
         let ps = vec![passage("/a.md"), passage("/b.md"), passage("/a.md")];
-        let ans = answer("q", &ps, &DownLlm).await;
+        let ans = answer("q", &ps, &DownLlm, None).await;
         assert_eq!(
             ans.files_read,
             vec!["/a.md".to_string(), "/b.md".to_string()]

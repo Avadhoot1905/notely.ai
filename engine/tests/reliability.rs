@@ -250,7 +250,7 @@ fn orchestrator(store: MemStore, ai: ToggleAi) -> (Orchestrator, JobRegistry) {
 }
 
 async fn process_transcript(orch: &Orchestrator, jobs: &JobRegistry) -> Result<MeetingId, ()> {
-    let (job_id, cancel) = jobs.create();
+    let (job_id, cancel) = jobs.create(notely_engine::pipeline::JobKind::Process);
     let (events, _rx) = tokio::sync::broadcast::channel(64);
     orch.process(
         &job_id,
@@ -321,7 +321,7 @@ async fn retry_after_recovery_enriches_without_duplicating() {
 
     // AI comes back; retry the SAME meeting.
     ai.set_down(false);
-    let (job_id, cancel) = jobs.create();
+    let (job_id, cancel) = jobs.create(notely_engine::pipeline::JobKind::Process);
     let (events, _rx) = tokio::sync::broadcast::channel(64);
     let out = orch.reprocess(&job_id, &id, &events, &cancel).await;
     assert!(out.is_ok(), "retry succeeds once AI is available");

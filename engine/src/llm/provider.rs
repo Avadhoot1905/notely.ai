@@ -74,6 +74,32 @@ pub struct GenerateResponse {
     pub model: String,
 }
 
+/// A request to embed one or more texts. Batch by construction: a single call embeds every input,
+/// which is what re-indexing a note (many chunks) needs and what runtimes like Ollama accept
+/// natively. A single text is just a one-element batch.
+#[derive(Debug, Clone)]
+pub struct EmbedRequest {
+    /// Embedding model tag. `None` => the provider's configured default model. Embeddings usually
+    /// need a *dedicated* embedding model, so callers normally set this explicitly.
+    pub model: Option<String>,
+    /// The texts to embed, in order. The response vectors correspond 1:1.
+    pub input: Vec<String>,
+}
+
+impl EmbedRequest {
+    /// Embed a batch of texts with the given model.
+    pub fn new(model: Option<String>, input: Vec<String>) -> Self {
+        Self { model, input }
+    }
+}
+
+/// The embedding result: one vector per input, in the same order.
+#[derive(Debug, Clone)]
+pub struct EmbedResponse {
+    pub vectors: Vec<Vec<f32>>,
+    pub model: String,
+}
+
 /// Errors a provider can produce.
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
@@ -83,6 +109,10 @@ pub enum LlmError {
     Runtime(String),
     #[error("could not decode the LLM runtime response: {0}")]
     Decode(String),
+    /// The runtime does not implement a requested capability (e.g. a chat-only backend asked to
+    /// embed). Callers treat this as "feature unavailable" and degrade, never as a hard failure.
+    #[error("the LLM runtime does not support this capability: {0}")]
+    Unsupported(String),
 }
 
 /// Executes generation against some local (later, possibly remote) runtime.
@@ -93,4 +123,14 @@ pub trait LlmProvider: Send + Sync {
 
     /// Cheap liveness/reachability check against the runtime.
     async fn health(&self) -> Result<(), LlmError>;
+
+    /// Produce embeddings for a batch of texts.
+    ///
+    /// Defaulted to `Unsupported` so a provider only opts in when its runtime actually embeds
+    /// (Ollama does; a plain chat runtime may not). Embeddings power hybrid search, which stays
+    /// entirely optional — callers fall back to FTS5 when this returns `Unsupported`.
+    async fn embed(&self, request: EmbedRequest) -> Result<EmbedResponse, LlmError> {
+        let _ = request;
+        Err(LlmError::Unsupported("embeddings".into()))
+    }
 }

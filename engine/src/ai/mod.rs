@@ -30,11 +30,30 @@ pub use provider::{AiAnalyzer, AiError, AnalysisContext};
 /// The concrete AI engine: per-chunk extraction + consolidation synthesis over an [`LlmProvider`].
 pub struct LlmAiEngine {
     llm: Arc<dyn LlmProvider>,
+    /// Optional per-task model overrides. `None` => the provider's default model (current behavior).
+    extraction_model: Option<String>,
+    synthesis_model: Option<String>,
 }
 
 impl LlmAiEngine {
     pub fn new(llm: Arc<dyn LlmProvider>) -> Self {
-        Self { llm }
+        Self {
+            llm,
+            extraction_model: None,
+            synthesis_model: None,
+        }
+    }
+
+    /// Route the two passes to specific models. Deterministic and configuration-driven; when a task
+    /// has no configured model the request keeps `None` and the provider's default is used.
+    pub fn with_models(
+        mut self,
+        extraction_model: Option<String>,
+        synthesis_model: Option<String>,
+    ) -> Self {
+        self.extraction_model = extraction_model;
+        self.synthesis_model = synthesis_model;
+        self
     }
 
     /// Generate, parsing the result; on a parse failure, retry ONCE with a stricter reminder before
@@ -67,7 +86,10 @@ impl AiAnalyzer for LlmAiEngine {
         chunk: &Chunk,
         context: &AnalysisContext,
     ) -> Result<ChunkFindings, AiError> {
-        let request = extraction::build_request(chunk, context);
+        let mut request = extraction::build_request(chunk, context);
+        if request.model.is_none() {
+            request.model = self.extraction_model.clone();
+        }
         self.generate_parsed(request, |raw| extraction::parse_findings(raw, chunk))
             .await
     }
@@ -79,7 +101,10 @@ impl AiAnalyzer for LlmAiEngine {
         context: &AnalysisContext,
     ) -> Result<MeetingIr, AiError> {
         let merged = MergedFindings::from_chunks(findings);
-        let request = synthesis::build_request(&merged, context);
+        let mut request = synthesis::build_request(&merged, context);
+        if request.model.is_none() {
+            request.model = self.synthesis_model.clone();
+        }
         let ir = self.generate_parsed(request, synthesis::parse_ir).await?;
         Ok(synthesis::reconcile(ir, &merged, transcript))
     }

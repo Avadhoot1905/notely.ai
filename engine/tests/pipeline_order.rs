@@ -176,7 +176,7 @@ fn pos(log: &[String], needle: &str) -> usize {
 async fn audio_input_runs_media_asr_chunk_extract_synthesize_then_store() {
     let calls: Calls = Arc::new(Mutex::new(Vec::new()));
     let (orch, jobs) = orchestrator(&calls);
-    let (job_id, cancel) = jobs.create();
+    let (job_id, cancel) = jobs.create(notely_engine::pipeline::JobKind::Process);
     let (events, _rx) = tokio::sync::broadcast::channel(64);
 
     orch.process(
@@ -214,7 +214,7 @@ async fn audio_input_runs_media_asr_chunk_extract_synthesize_then_store() {
 async fn transcript_input_skips_media_and_asr_but_still_extracts_and_synthesizes() {
     let calls: Calls = Arc::new(Mutex::new(Vec::new()));
     let (orch, jobs) = orchestrator(&calls);
-    let (job_id, cancel) = jobs.create();
+    let (job_id, cancel) = jobs.create(notely_engine::pipeline::JobKind::Process);
     let (events, _rx) = tokio::sync::broadcast::channel(64);
 
     let transcript = Transcript {
@@ -250,7 +250,7 @@ async fn transcript_input_skips_media_and_asr_but_still_extracts_and_synthesizes
 async fn cancellation_before_run_stops_the_pipeline() {
     let calls: Calls = Arc::new(Mutex::new(Vec::new()));
     let (orch, jobs) = orchestrator(&calls);
-    let (job_id, cancel) = jobs.create();
+    let (job_id, cancel) = jobs.create(notely_engine::pipeline::JobKind::Process);
     cancel.cancel();
     let (events, _rx) = tokio::sync::broadcast::channel(64);
 
