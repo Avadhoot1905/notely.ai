@@ -13,7 +13,9 @@
 ///
 /// v2: added vault-wide `Search`/`Ask` requests and `SearchResults`/`Answer` responses.
 /// v3: added `ListMeetings`/`ReprocessMeeting` and the `MeetingList` response (Inbox + retry).
-const int protocolVersion = 3;
+/// v4: added the Knowledge Space (`GetKnowledgeMap`) and external sources — Slack/Teams —
+///     (`ListSourceChannels`/`ImportSource`/`ListSources`/`DisconnectSource`).
+const int protocolVersion = 4;
 
 // ---------------------------------------------------------------------------
 // Domain models (mirror engine/src/domain and pipeline/jobs.rs).
@@ -190,6 +192,245 @@ class MeetingSummary {
         ? null
         : ProcessingStatus.fromJson(json['status'] as Map<String, dynamic>),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge Space (mirror engine/src/domain/knowledge_map.rs). All coordinates
+// are normalized to [0,1]; the renderer lays them out at any size.
+// ---------------------------------------------------------------------------
+
+/// A conceptual region ("hill"/domain) of the knowledge landscape.
+class KnowledgeRegion {
+  final int id;
+  final String label;
+  final double x;
+  final double y;
+  final double radius;
+  final double mass;
+  final int conceptCount;
+  final int docCount;
+  final int rank;
+  final List<String> sources;
+
+  const KnowledgeRegion({
+    required this.id,
+    required this.label,
+    required this.x,
+    required this.y,
+    required this.radius,
+    required this.mass,
+    required this.conceptCount,
+    required this.docCount,
+    required this.rank,
+    required this.sources,
+  });
+
+  factory KnowledgeRegion.fromJson(Map<String, dynamic> json) =>
+      KnowledgeRegion(
+        id: (json['id'] as num).toInt(),
+        label: json['label'] as String? ?? '',
+        x: (json['x'] as num).toDouble(),
+        y: (json['y'] as num).toDouble(),
+        radius: (json['radius'] as num).toDouble(),
+        mass: (json['mass'] as num).toDouble(),
+        conceptCount: (json['concept_count'] as num?)?.toInt() ?? 0,
+        docCount: (json['doc_count'] as num?)?.toInt() ?? 0,
+        rank: (json['rank'] as num?)?.toInt() ?? 0,
+        sources:
+            (json['sources'] as List?)?.whereType<String>().toList() ??
+            const [],
+      );
+}
+
+/// A single concept — a peak in the landscape. [term] is a real searchable token.
+class KnowledgeConcept {
+  final int regionId;
+  final String term;
+  final double x;
+  final double y;
+  final double mass;
+  final int docCount;
+  final int rank;
+  final List<String> sources;
+
+  const KnowledgeConcept({
+    required this.regionId,
+    required this.term,
+    required this.x,
+    required this.y,
+    required this.mass,
+    required this.docCount,
+    required this.rank,
+    required this.sources,
+  });
+
+  factory KnowledgeConcept.fromJson(Map<String, dynamic> json) =>
+      KnowledgeConcept(
+        regionId: (json['region_id'] as num).toInt(),
+        term: json['term'] as String? ?? '',
+        x: (json['x'] as num).toDouble(),
+        y: (json['y'] as num).toDouble(),
+        mass: (json['mass'] as num).toDouble(),
+        docCount: (json['doc_count'] as num?)?.toInt() ?? 0,
+        rank: (json['rank'] as num?)?.toInt() ?? 0,
+        sources:
+            (json['sources'] as List?)?.whereType<String>().toList() ??
+            const [],
+      );
+}
+
+/// Corpus-level facts about how the map was derived.
+class KnowledgeMapStats {
+  final int noteCount;
+  final int conceptCount;
+  final int regionCount;
+  final bool truncated;
+
+  const KnowledgeMapStats({
+    this.noteCount = 0,
+    this.conceptCount = 0,
+    this.regionCount = 0,
+    this.truncated = false,
+  });
+
+  factory KnowledgeMapStats.fromJson(Map<String, dynamic> json) =>
+      KnowledgeMapStats(
+        noteCount: (json['note_count'] as num?)?.toInt() ?? 0,
+        conceptCount: (json['concept_count'] as num?)?.toInt() ?? 0,
+        regionCount: (json['region_count'] as num?)?.toInt() ?? 0,
+        truncated: json['truncated'] as bool? ?? false,
+      );
+}
+
+/// The derived Knowledge Space (mirrors `domain::KnowledgeMap`).
+class KnowledgeMap {
+  final List<KnowledgeRegion> regions;
+  final List<KnowledgeConcept> concepts;
+  final KnowledgeMapStats stats;
+
+  const KnowledgeMap({
+    this.regions = const [],
+    this.concepts = const [],
+    this.stats = const KnowledgeMapStats(),
+  });
+
+  bool get isEmpty => concepts.isEmpty;
+
+  factory KnowledgeMap.fromJson(Map<String, dynamic> json) => KnowledgeMap(
+    regions:
+        (json['regions'] as List?)
+            ?.map((e) => KnowledgeRegion.fromJson(e as Map<String, dynamic>))
+            .toList(growable: false) ??
+        const [],
+    concepts:
+        (json['concepts'] as List?)
+            ?.map((e) => KnowledgeConcept.fromJson(e as Map<String, dynamic>))
+            .toList(growable: false) ??
+        const [],
+    stats: json['stats'] == null
+        ? const KnowledgeMapStats()
+        : KnowledgeMapStats.fromJson(json['stats'] as Map<String, dynamic>),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// External sources — Slack/Teams (mirror engine/src/sources/model.rs).
+// ---------------------------------------------------------------------------
+
+/// A selectable channel/conversation within a source.
+class SourceChannel {
+  final String id;
+  final String name;
+  final String? purpose;
+  final int? memberCount;
+
+  const SourceChannel({
+    required this.id,
+    required this.name,
+    this.purpose,
+    this.memberCount,
+  });
+
+  factory SourceChannel.fromJson(Map<String, dynamic> json) => SourceChannel(
+    id: json['id'] as String,
+    name: json['name'] as String? ?? '',
+    purpose: json['purpose'] as String?,
+    memberCount: (json['member_count'] as num?)?.toInt(),
+  );
+}
+
+/// The explicit, bounded scope of an import.
+class ImportScope {
+  final List<String> channelIds;
+  final String? since;
+  final int? maxMessages;
+
+  const ImportScope({required this.channelIds, this.since, this.maxMessages});
+
+  Map<String, dynamic> toJson() => {
+    'channel_ids': channelIds,
+    if (since != null) 'since': since,
+    if (maxMessages != null) 'max_messages': maxMessages,
+  };
+}
+
+/// The outcome of an import (mirrors `sources::model::ImportSummary`).
+class ImportSummary {
+  final int channelsImported;
+  final int messagesImported;
+  final int messagesSkipped;
+  final int documentsWritten;
+  final List<String> warnings;
+
+  const ImportSummary({
+    this.channelsImported = 0,
+    this.messagesImported = 0,
+    this.messagesSkipped = 0,
+    this.documentsWritten = 0,
+    this.warnings = const [],
+  });
+
+  factory ImportSummary.fromJson(Map<String, dynamic> json) => ImportSummary(
+    channelsImported: (json['channels_imported'] as num?)?.toInt() ?? 0,
+    messagesImported: (json['messages_imported'] as num?)?.toInt() ?? 0,
+    messagesSkipped: (json['messages_skipped'] as num?)?.toInt() ?? 0,
+    documentsWritten: (json['documents_written'] as num?)?.toInt() ?? 0,
+    warnings:
+        (json['warnings'] as List?)?.whereType<String>().toList() ?? const [],
+  );
+}
+
+/// A connected external source and its import summary (mirrors `sources::model::ConnectedSource`).
+class ConnectedSource {
+  final String kind; // 'slack' | 'teams'
+  final String workspace;
+  final String folder;
+  final String? lastImportedAt;
+  final int documentCount;
+  final List<String> importedChannels;
+
+  const ConnectedSource({
+    required this.kind,
+    required this.workspace,
+    required this.folder,
+    this.lastImportedAt,
+    this.documentCount = 0,
+    this.importedChannels = const [],
+  });
+
+  factory ConnectedSource.fromJson(Map<String, dynamic> json) =>
+      ConnectedSource(
+        kind: json['kind'] as String? ?? '',
+        workspace: json['workspace'] as String? ?? '',
+        folder: json['folder'] as String? ?? '',
+        lastImportedAt: json['last_imported_at'] as String?,
+        documentCount: (json['document_count'] as num?)?.toInt() ?? 0,
+        importedChannels:
+            (json['imported_channels'] as List?)
+                ?.whereType<String>()
+                .toList() ??
+            const [],
+      );
 }
 
 /// Coarse job status (mirrors `pipeline::jobs::JobStatus`).
@@ -461,6 +702,92 @@ class ReprocessMeeting extends Request {
   Map<String, dynamic>? get params => {'meeting_id': meetingId};
 }
 
+/// Derive the Knowledge Space (semantic-topographic map) for the vault at [vaultPath].
+class GetKnowledgeMap extends Request {
+  final String vaultPath;
+  const GetKnowledgeMap(this.vaultPath);
+  @override
+  String get type => 'GetKnowledgeMap';
+  @override
+  Map<String, dynamic>? get params => {'vault_path': vaultPath};
+}
+
+/// List importable channels for an external source. [token] is used in-memory only by the engine
+/// and never persisted.
+class ListSourceChannels extends Request {
+  final String kind;
+  final String token;
+  final String baseUrl;
+  const ListSourceChannels({
+    required this.kind,
+    required this.token,
+    this.baseUrl = '',
+  });
+  @override
+  String get type => 'ListSourceChannels';
+  @override
+  Map<String, dynamic>? get params => {
+    'kind': kind,
+    'token': token,
+    if (baseUrl.isNotEmpty) 'base_url': baseUrl,
+  };
+}
+
+/// Import selected channels from an external source into the vault. [token] is used in-memory only.
+class ImportSource extends Request {
+  final String kind;
+  final String token;
+  final String baseUrl;
+  final String vaultPath;
+  final ImportScope scope;
+  const ImportSource({
+    required this.kind,
+    required this.token,
+    this.baseUrl = '',
+    required this.vaultPath,
+    required this.scope,
+  });
+  @override
+  String get type => 'ImportSource';
+  @override
+  Map<String, dynamic>? get params => {
+    'kind': kind,
+    'token': token,
+    if (baseUrl.isNotEmpty) 'base_url': baseUrl,
+    'vault_path': vaultPath,
+    'scope': scope.toJson(),
+  };
+}
+
+/// List connected sources and what has been imported.
+class ListSources extends Request {
+  const ListSources();
+  @override
+  String get type => 'ListSources';
+  @override
+  Map<String, dynamic>? get params => null;
+}
+
+/// Disconnect a source; optionally delete its imported Markdown from the vault.
+class DisconnectSource extends Request {
+  final String kind;
+  final String vaultPath;
+  final bool removeImported;
+  const DisconnectSource({
+    required this.kind,
+    required this.vaultPath,
+    this.removeImported = false,
+  });
+  @override
+  String get type => 'DisconnectSource';
+  @override
+  Map<String, dynamic>? get params => {
+    'kind': kind,
+    'vault_path': vaultPath,
+    'remove_imported': removeImported,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Responses (Engine -> Flutter). Mirrors `ipc::protocol::Response`, which is
 // serde-tagged `{ "type": <variant>, "data": { ... } }`.
@@ -527,6 +854,31 @@ sealed class Response {
               .map((e) => MeetingSummary.fromJson(e as Map<String, dynamic>))
               .toList(growable: false),
         );
+      case 'KnowledgeMap':
+        return KnowledgeMapResponse(
+          KnowledgeMap.fromJson(data as Map<String, dynamic>),
+        );
+      case 'SourceChannels':
+        final d = data as Map<String, dynamic>;
+        return SourceChannelsResponse(
+          workspace: d['workspace'] as String? ?? '',
+          channels: (d['channels'] as List? ?? const [])
+              .map((e) => SourceChannel.fromJson(e as Map<String, dynamic>))
+              .toList(growable: false),
+        );
+      case 'ImportResult':
+        return ImportResultResponse(
+          ImportSummary.fromJson(data as Map<String, dynamic>),
+        );
+      case 'Sources':
+        return SourcesResponse(
+          (data as List? ?? const [])
+              .map((e) => ConnectedSource.fromJson(e as Map<String, dynamic>))
+              .toList(growable: false),
+        );
+      case 'Ok':
+        // Unit variant: serde omits `data` for it, so none is expected here.
+        return const OkResponse();
       case 'Error':
         return ErrorResponse(
           (data as Map<String, dynamic>)['message'] as String,
@@ -653,6 +1005,35 @@ class AnswerResponse extends Response {
 class MeetingListResponse extends Response {
   final List<MeetingSummary> meetings;
   const MeetingListResponse(this.meetings);
+}
+
+class KnowledgeMapResponse extends Response {
+  final KnowledgeMap map;
+  const KnowledgeMapResponse(this.map);
+}
+
+class SourceChannelsResponse extends Response {
+  final String workspace;
+  final List<SourceChannel> channels;
+  const SourceChannelsResponse({
+    required this.workspace,
+    required this.channels,
+  });
+}
+
+class ImportResultResponse extends Response {
+  final ImportSummary summary;
+  const ImportResultResponse(this.summary);
+}
+
+class SourcesResponse extends Response {
+  final List<ConnectedSource> sources;
+  const SourcesResponse(this.sources);
+}
+
+/// A source-mutating request (import/disconnect) succeeded with nothing else to return.
+class OkResponse extends Response {
+  const OkResponse();
 }
 
 class ErrorResponse extends Response {

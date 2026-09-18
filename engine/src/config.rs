@@ -318,6 +318,12 @@ impl Config {
         self.data_dir.join("llm_cache.db")
     }
 
+    /// Path to the connected-sources registry (non-secret bookkeeping for Slack/Teams imports —
+    /// never stores tokens). Separate DB: losing it costs only bookkeeping, not the imported notes.
+    pub fn sources_registry_path(&self) -> PathBuf {
+        self.data_dir.join("sources.db")
+    }
+
     /// The default model tag of the currently selected LLM runtime.
     pub fn active_model(&self) -> &str {
         match self.llm_provider {

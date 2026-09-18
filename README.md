@@ -143,6 +143,22 @@ Grouped by area, and limited to what actually works in the current tree.
 - An orchestrator with **persistent** jobs (requeued on restart), cancellation, and granular
   per-stage progress events.
 
+### Knowledge Space & connected sources
+- **Knowledge Space**: a typographic, semantic-topographic view of your vault — *not* a node-link
+  graph. Concepts are peaks, related ideas merge into continuous domains ("hills"), semantic
+  distance is spatial distance, and knowledge density is elevation. It is **derived deterministically
+  from the same on-disk index** (tf-idf concepts → co-occurrence regions → emergent layout), so it
+  costs nothing extra, stays in step with Search/Ask, and degrades to a calm empty state on a small
+  vault. Pan, zoom, semantic zoom (labels appear in tiers), focus a region, inspect a concept, and
+  drill straight to the underlying evidence (which opens in the editor).
+- **Connected knowledge sources (Slack, Teams)**: a deliberate, privacy-conscious importer — *not*
+  an embedded client. You pick specific channels and a bounded range; imported messages are
+  normalized into provenance-bearing Markdown notes under `Imported/<Source>/` in your vault, so
+  they become searchable, answerable, and **citable** through the *same* pipeline as every other
+  note (and appear in the Knowledge Space, tagged by source). Import is idempotent (dedup by message
+  id) and removable (disconnect, optionally deleting the notes). Tokens are held **in memory only**
+  and never persisted — the engine keeps just non-secret bookkeeping of what's connected/imported.
+
 ### Infrastructure
 - **Typed IPC** over loopback TCP with a versioned, language-neutral JSON-Schema contract
   (`packages/protocol`), request/response correlation, an async event stream, and client-side
@@ -450,7 +466,9 @@ open questions ([`docs/research.md`](docs/research.md)) for the reasoning.
   capture states + one-click retry (source persisted before AI, so AI failure never loses data);
   persistent jobs requeued on restart; a transparent LLM result cache and MLX (Apple Silicon) as an
   opt-in runtime; meeting detection + notification + overlay (macOS verified); local two-pass AI
-  pipeline (transcript → Meeting IR → Markdown) proven end-to-end.
+  pipeline (transcript → Meeting IR → Markdown) proven end-to-end; a typographic **Knowledge Space**
+  derived from the index; and **Slack/Teams** as deliberate, citable knowledge sources normalized
+  into the vault (tokens never persisted).
 - **Near-term:** runtime-verify and harden the Windows/Linux native runtimes (incl. tray relaunch
   and companion-position persistence); wire real ASR into live listening; semantic (embedding)
   search alongside Ask's full-text retrieval; HTML export.

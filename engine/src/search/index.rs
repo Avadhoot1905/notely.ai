@@ -208,6 +208,32 @@ impl SearchIndex {
         .await
     }
 
+    /// Every indexed chunk as `(path, title, body)` — the raw material the Knowledge Space derives
+    /// its concepts from. Reads straight from the FTS store (already synced), so it never re-walks
+    /// the vault. Ordered by `(path, rowid)` for deterministic downstream processing.
+    pub async fn all_chunks(&self) -> Result<Vec<(String, String, String)>, SearchError> {
+        self.with_conn(|c| {
+            let mut stmt = c
+                .prepare("SELECT path, title, body FROM chunks ORDER BY path, rowid")
+                .map_err(be)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(be)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(be)?);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
     /// How many indexed notes still need (re)embedding — their content changed since last embedded.
     pub async fn pending_embedding_count(&self) -> Result<usize, SearchError> {
         self.with_conn(pending_paths_blocking)

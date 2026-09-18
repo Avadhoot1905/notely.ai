@@ -20,6 +20,8 @@ import '../editor/editor_state.dart';
 import '../editor/markdown_editor.dart';
 import '../explorer/explorer_state.dart';
 import '../explorer/file_tree.dart';
+import '../integrations/integrations_panel.dart';
+import '../knowledge/knowledge_space.dart';
 import '../listening/listening_button.dart';
 import '../listening/listening_state.dart';
 import '../listening/transcript_panel.dart';
@@ -34,83 +36,99 @@ class WorkspaceShell extends StatelessWidget {
     final t = context.tokens;
     return _ErrorListener(
       child: _TitleSync(
-        child: Scaffold(
-          backgroundColor: t.background,
-          body: Column(
-            children: [
-              const _TitleBar(),
-              Expanded(
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: NotelyDims.sidebarWidth,
-                      child: _Sidebar(),
-                    ),
-                    _VerticalDivider(t),
-                    Expanded(
-                      child: AnimatedBuilder(
-                        animation: Listenable.merge([
-                          scope.listening,
-                          scope.ask,
-                          scope.inbox,
-                        ]),
-                        builder: (context, _) {
-                          // Right dock precedence: Ask → Inbox → live transcript. Ask and Inbox
-                          // are made mutually exclusive by their toggles, so this only picks a
-                          // winner in edge cases.
-                          final askOpen = scope.ask.isOpen;
-                          final inboxOpen = scope.inbox.isOpen;
-                          final showTranscript = scope.listening.showTranscript;
-                          final showRight =
-                              askOpen || inboxOpen || showTranscript;
-                          final wideDock = askOpen || inboxOpen;
-                          return LayoutBuilder(
-                            builder: (context, constraints) {
-                              // Shrink the right panel toward its minimum on narrow windows so
-                              // the editor stays usable.
-                              final available = constraints.maxWidth;
-                              final panelW = wideDock
-                                  ? (available < 820
-                                        ? NotelyDims.askMinWidth
-                                        : NotelyDims.askWidth)
-                                  : (available < 760
-                                        ? NotelyDims.transcriptMinWidth
-                                        : NotelyDims.transcriptWidth);
-                              return Row(
-                                children: [
-                                  const Expanded(child: MarkdownEditor()),
-                                  ClipRect(
-                                    child: AnimatedAlign(
-                                      alignment: Alignment.centerLeft,
-                                      duration: NotelyDims.panelAnim,
-                                      curve: NotelyMotion.curve,
-                                      widthFactor: showRight ? 1.0 : 0.0,
-                                      child: SizedBox(
-                                        width: panelW,
-                                        child: showRight
-                                            ? (askOpen
-                                                  ? const AskPanel()
-                                                  : inboxOpen
-                                                  ? const InboxPanel()
-                                                  : const TranscriptPanel())
-                                            : null,
-                                      ),
-                                    ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _workspace(context, scope, t),
+            // The Knowledge Space is a full-window overlay — a distinct "way of seeing" the same
+            // knowledge, opened from the title bar and dismissed back to the workspace.
+            AnimatedBuilder(
+              animation: scope.knowledge,
+              builder: (context, _) => scope.knowledge.isOpen
+                  ? const Positioned.fill(child: KnowledgeSpace())
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _workspace(BuildContext context, AppScope scope, NotelyTokens t) {
+    return Scaffold(
+      backgroundColor: t.background,
+      body: Column(
+        children: [
+          const _TitleBar(),
+          Expanded(
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: NotelyDims.sidebarWidth,
+                  child: _Sidebar(),
+                ),
+                _VerticalDivider(t),
+                Expanded(
+                  child: AnimatedBuilder(
+                    animation: Listenable.merge([
+                      scope.listening,
+                      scope.ask,
+                      scope.inbox,
+                    ]),
+                    builder: (context, _) {
+                      // Right dock precedence: Ask → Inbox → live transcript. Ask and Inbox
+                      // are made mutually exclusive by their toggles, so this only picks a
+                      // winner in edge cases.
+                      final askOpen = scope.ask.isOpen;
+                      final inboxOpen = scope.inbox.isOpen;
+                      final showTranscript = scope.listening.showTranscript;
+                      final showRight = askOpen || inboxOpen || showTranscript;
+                      final wideDock = askOpen || inboxOpen;
+                      return LayoutBuilder(
+                        builder: (context, constraints) {
+                          // Shrink the right panel toward its minimum on narrow windows so
+                          // the editor stays usable.
+                          final available = constraints.maxWidth;
+                          final panelW = wideDock
+                              ? (available < 820
+                                    ? NotelyDims.askMinWidth
+                                    : NotelyDims.askWidth)
+                              : (available < 760
+                                    ? NotelyDims.transcriptMinWidth
+                                    : NotelyDims.transcriptWidth);
+                          return Row(
+                            children: [
+                              const Expanded(child: MarkdownEditor()),
+                              ClipRect(
+                                child: AnimatedAlign(
+                                  alignment: Alignment.centerLeft,
+                                  duration: NotelyDims.panelAnim,
+                                  curve: NotelyMotion.curve,
+                                  widthFactor: showRight ? 1.0 : 0.0,
+                                  child: SizedBox(
+                                    width: panelW,
+                                    child: showRight
+                                        ? (askOpen
+                                              ? const AskPanel()
+                                              : inboxOpen
+                                              ? const InboxPanel()
+                                              : const TranscriptPanel())
+                                        : null,
                                   ),
-                                ],
-                              );
-                            },
+                                ),
+                              ),
+                            ],
                           );
                         },
-                      ),
-                    ),
-                  ],
+                      );
+                    },
+                  ),
                 ),
-              ),
-              const _StatusBar(),
-            ],
+              ],
+            ),
           ),
-        ),
+          const _StatusBar(),
+        ],
       ),
     );
   }
@@ -327,6 +345,18 @@ class _TitleBar extends StatelessWidget {
               },
             ),
           ),
+          _ChromeIcon(
+            icon: Icons.terrain_outlined,
+            tip: 'Knowledge Space — see the shape of your knowledge',
+            onTap: () => scope.knowledge.open(scope.stash.path),
+          ),
+          const SizedBox(width: 2),
+          _ChromeIcon(
+            icon: Icons.hub_outlined,
+            tip: 'Integrations — connect Slack & Teams',
+            onTap: () => IntegrationsDialog.show(context),
+          ),
+          const SizedBox(width: 6),
           const AskButton(),
           const SizedBox(width: 8),
           const _ThemeToggle(),

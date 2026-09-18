@@ -36,7 +36,10 @@ Defined in `engine/src/ipc/protocol.rs` and `events.rs`.
 `Health` · `ProcessMeeting { input }` · `GetJob { job_id }` · `CancelJob { job_id }` ·
 `GetMeeting { meeting_id }` · `GetTranscript { meeting_id }` · `GetMom { meeting_id }` ·
 `Search { query, vault_path, limit? }` · `Ask { question, vault_path }` · `ListMeetings` ·
-`ReprocessMeeting { meeting_id }`
+`ReprocessMeeting { meeting_id }` · `GetKnowledgeMap { vault_path }` ·
+`ListSourceChannels { kind, token, base_url? }` ·
+`ImportSource { kind, token, base_url?, vault_path, scope }` · `ListSources` ·
+`DisconnectSource { kind, vault_path, remove_imported? }`
 
 `ProcessInput` is either `Transcript { title?, transcript }` (the supported v0 path) or
 `Audio { title?, path }` (needs media + ASR — not wired end-to-end yet).
@@ -50,10 +53,20 @@ is unavailable it degrades to a deterministic list of the matching passages rath
 `ReprocessMeeting` retries AI enrichment for a captured meeting from its stored transcript — the
 source is persisted before AI runs, so retry is idempotent and never re-captures or duplicates.
 
+`GetKnowledgeMap` derives the **Knowledge Space** — a deterministic, semantic-topographic model
+(regions → concepts → normalized layout) from the same on-disk index, so it costs nothing extra and
+stays in step with Search/Ask. The `ListSourceChannels`/`ImportSource`/`ListSources`/
+`DisconnectSource` family manages **external knowledge sources** (Slack, Teams): imported messages
+are normalized into provenance-bearing Markdown notes under `Imported/<Source>/` in the vault, so
+they flow through the *same* index → Search → Ask → citation pipeline. Tokens are passed in-memory
+per request and **never persisted** by the engine; only non-secret bookkeeping (what's connected and
+imported) is stored.
+
 **Responses (immediate):** `Health(info)` · `JobAccepted { job_id }` · `Job(job)` ·
 `Meeting(meeting)` · `Transcript(transcript)` · `Mom { markdown }` ·
 `SearchResults([SearchHit])` · `Answer(AskAnswer)` · `MeetingList([MeetingSummary])` ·
-`Error { message }`
+`KnowledgeMap(map)` · `SourceChannels { workspace, channels }` · `ImportResult(summary)` ·
+`Sources([ConnectedSource])` · `Ok` · `Error { message }`
 
 **Events (Engine → Flutter, async):**
 
@@ -93,7 +106,8 @@ stages.
 - **`job_id`** tracks a long-running pipeline run for progress and cancellation.
 - **`PROTOCOL_VERSION`** (currently `3`) is sent in every envelope. The client refuses an engine
   with a mismatched major version. (v2 added `Search`/`Ask` + `SearchResults`/`Answer`; v3 added
-  `ListMeetings`/`ReprocessMeeting` + `MeetingList` for the Inbox and reliable retry.)
+  `ListMeetings`/`ReprocessMeeting` + `MeetingList` for the Inbox and reliable retry; v4 added
+  `GetKnowledgeMap` for the Knowledge Space and the Slack/Teams source family.)
 
 ## Versioning philosophy
 

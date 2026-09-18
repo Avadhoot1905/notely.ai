@@ -3,7 +3,7 @@
   "$id": "https://notely.ai/schema/ipc.schema.json",
   "title": "Notely IPC protocol",
   "description": "Canonical, language-neutral schema for the Flutter <-> Rust IPC contract. Mirrored by engine/src/ipc (the source of truth) and apps/desktop/lib/ipc. See packages/protocol/README.md. Transport: newline-delimited JSON over a loopback TCP socket (default 127.0.0.1:8765). Requests are wrapped in a RequestEnvelope { protocol_version, request_id, ...Request }; responses in a ResponseEnvelope { protocol_version, request_id, ...Response }; events in an EventEnvelope { protocol_version, event: Event }.",
-  "protocolVersion": 3,
+  "protocolVersion": 4,
   "definitions": {
     "ProcessInput": {
       "description": "What to process into a meeting. Tagged by `kind`.",
@@ -25,7 +25,12 @@
         { "properties": { "type": { "const": "Search" }, "params": { "properties": { "query": { "type": "string" }, "vault_path": { "type": "string" }, "limit": { "type": ["integer", "null"] } }, "required": ["query", "vault_path"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "Ask" }, "params": { "properties": { "question": { "type": "string" }, "vault_path": { "type": "string" } }, "required": ["question", "vault_path"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "ListMeetings" } }, "required": ["type"] },
-        { "properties": { "type": { "const": "ReprocessMeeting" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] }
+        { "properties": { "type": { "const": "ReprocessMeeting" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "GetKnowledgeMap" }, "params": { "properties": { "vault_path": { "type": "string" } }, "required": ["vault_path"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "ListSourceChannels" }, "params": { "properties": { "kind": { "type": "string" }, "token": { "type": "string" }, "base_url": { "type": "string" } }, "required": ["kind", "token"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "ImportSource" }, "params": { "properties": { "kind": { "type": "string" }, "token": { "type": "string" }, "base_url": { "type": "string" }, "vault_path": { "type": "string" }, "scope": { "$ref": "#/definitions/ImportScope" } }, "required": ["kind", "token", "vault_path", "scope"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "ListSources" } }, "required": ["type"] },
+        { "properties": { "type": { "const": "DisconnectSource" }, "params": { "properties": { "kind": { "type": "string" }, "vault_path": { "type": "string" }, "remove_imported": { "type": "boolean" } }, "required": ["kind", "vault_path"] } }, "required": ["type", "params"] }
       ]
     },
     "Response": {
@@ -40,6 +45,11 @@
         { "properties": { "type": { "const": "SearchResults" }, "data": { "type": "array", "items": { "$ref": "#/definitions/SearchHit" } } }, "required": ["type", "data"] },
         { "properties": { "type": { "const": "Answer" }, "data": { "$ref": "#/definitions/AskAnswer" } }, "required": ["type", "data"] },
         { "properties": { "type": { "const": "MeetingList" }, "data": { "type": "array", "items": { "$ref": "#/definitions/MeetingSummary" } } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "KnowledgeMap" }, "data": { "$ref": "#/definitions/KnowledgeMap" } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "SourceChannels" }, "data": { "properties": { "workspace": { "type": "string" }, "channels": { "type": "array", "items": { "$ref": "#/definitions/Channel" } } }, "required": ["workspace", "channels"] } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "ImportResult" }, "data": { "$ref": "#/definitions/ImportSummary" } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "Sources" }, "data": { "type": "array", "items": { "$ref": "#/definitions/ConnectedSource" } } }, "required": ["type", "data"] },
+        { "properties": { "type": { "const": "Ok" }, "data": { "type": ["object", "null"] } }, "required": ["type"] },
         { "properties": { "type": { "const": "Error" }, "data": { "properties": { "message": { "type": "string" } }, "required": ["message"] } }, "required": ["type", "data"] }
       ]
     },
@@ -188,6 +198,96 @@
         "status": { "$ref": "#/definitions/ProcessingStatus" }
       },
       "required": ["meeting"]
+    },
+    "KnowledgeMap": {
+      "description": "The Knowledge Space: a semantic-topographic view derived deterministically from the indexed vault. Coordinates are normalized to [0,1]. Empty regions/concepts is valid for an empty vault.",
+      "properties": {
+        "regions": { "type": "array", "items": { "$ref": "#/definitions/Region" } },
+        "concepts": { "type": "array", "items": { "$ref": "#/definitions/Concept" } },
+        "stats": { "$ref": "#/definitions/MapStats" }
+      },
+      "required": ["regions", "concepts", "stats"]
+    },
+    "Region": {
+      "description": "A conceptual domain/hill. `label` is the region's most prominent concept; `rank` (0 = most prominent) drives semantic zoom.",
+      "properties": {
+        "id": { "type": "integer" },
+        "label": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "radius": { "type": "number" },
+        "mass": { "type": "number" },
+        "concept_count": { "type": "integer" },
+        "doc_count": { "type": "integer" },
+        "rank": { "type": "integer" },
+        "sources": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["id", "label", "x", "y", "radius", "mass", "concept_count", "doc_count", "rank", "sources"]
+    },
+    "Concept": {
+      "description": "A peak in the landscape. `term` is a real searchable token (drill-to-evidence); `mass` is knowledge density; `sources` names the source kinds it draws from.",
+      "properties": {
+        "region_id": { "type": "integer" },
+        "term": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "mass": { "type": "number" },
+        "doc_count": { "type": "integer" },
+        "rank": { "type": "integer" },
+        "sources": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["region_id", "term", "x", "y", "mass", "doc_count", "rank", "sources"]
+    },
+    "MapStats": {
+      "properties": {
+        "note_count": { "type": "integer" },
+        "concept_count": { "type": "integer" },
+        "region_count": { "type": "integer" },
+        "truncated": { "type": "boolean" }
+      },
+      "required": ["note_count", "concept_count", "region_count", "truncated"]
+    },
+    "Channel": {
+      "description": "A selectable container within an external source (a Slack/Teams channel or conversation).",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "purpose": { "type": "string" },
+        "member_count": { "type": "integer" }
+      },
+      "required": ["id", "name"]
+    },
+    "ImportScope": {
+      "description": "The explicit, bounded scope of an import — never 'the whole workspace'.",
+      "properties": {
+        "channel_ids": { "type": "array", "items": { "type": "string" } },
+        "since": { "type": "string", "format": "date-time" },
+        "max_messages": { "type": "integer" }
+      },
+      "required": ["channel_ids"]
+    },
+    "ImportSummary": {
+      "description": "The outcome of an import, surfaced so the user sees exactly what was brought in.",
+      "properties": {
+        "channels_imported": { "type": "integer" },
+        "messages_imported": { "type": "integer" },
+        "messages_skipped": { "type": "integer" },
+        "documents_written": { "type": "integer" },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["channels_imported", "messages_imported", "messages_skipped", "documents_written", "warnings"]
+    },
+    "ConnectedSource": {
+      "description": "A connected external source and its import summary — metadata only, never a token.",
+      "properties": {
+        "kind": { "enum": ["slack", "teams"] },
+        "workspace": { "type": "string" },
+        "folder": { "type": "string" },
+        "last_imported_at": { "type": "string", "format": "date-time" },
+        "document_count": { "type": "integer" },
+        "imported_channels": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["kind", "workspace", "folder", "document_count", "imported_channels"]
     }
   }
 }

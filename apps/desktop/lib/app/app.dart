@@ -13,6 +13,8 @@ import '../features/ask/ask_state.dart';
 import '../features/editor/editor_state.dart';
 import '../features/explorer/explorer_state.dart';
 import '../features/inbox/inbox_state.dart';
+import '../features/integrations/integrations_state.dart';
+import '../features/knowledge/knowledge_state.dart';
 import '../features/listening/listening_state.dart';
 import '../features/meetings/meeting_session_manager.dart';
 import '../features/stash/stash_picker.dart';
@@ -69,6 +71,15 @@ class _NotelyAppState extends State<NotelyApp> {
   );
   // The Inbox is a view over the engine's captured meetings + their processing status.
   late final InboxController _inbox = InboxController(engine: _engine);
+  // The Knowledge Space is a derived, semantic-topographic view of the vault (engine-computed).
+  late final KnowledgeController _knowledge = KnowledgeController(
+    engine: _engine,
+  );
+  // External knowledge sources (Slack/Teams). Tokens are held in memory only (never persisted).
+  late final IntegrationsController _integrations = IntegrationsController(
+    engine: _engine,
+    resolveVault: () => _stash.path,
+  );
 
   // Meeting-detection runtime. Deliberately OWNED BY THE APP RUNTIME, not gated by the main
   // window or an open stash: detection, the OS notification, and the companion overlay must keep
@@ -141,6 +152,8 @@ class _NotelyAppState extends State<NotelyApp> {
     _theme.dispose();
     _ask.dispose();
     _inbox.dispose();
+    _knowledge.dispose();
+    _integrations.dispose();
     _meetings.dispose();
     _detector.dispose();
     _notifications.dispose();
@@ -168,6 +181,8 @@ class _NotelyAppState extends State<NotelyApp> {
           ask: _ask,
           inbox: _inbox,
           meetings: _meetings,
+          knowledge: _knowledge,
+          integrations: _integrations,
           engine: _engine,
           child: const _AppGate(),
         ),

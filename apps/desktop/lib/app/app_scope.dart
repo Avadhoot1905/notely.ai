@@ -10,6 +10,8 @@ import '../features/ask/ask_state.dart';
 import '../features/editor/editor_state.dart';
 import '../features/explorer/explorer_state.dart';
 import '../features/inbox/inbox_state.dart';
+import '../features/integrations/integrations_state.dart';
+import '../features/knowledge/knowledge_state.dart';
 import '../features/listening/listening_state.dart';
 import '../features/meetings/meeting_session_manager.dart';
 import '../features/stash/stash_state.dart';
@@ -27,6 +29,8 @@ class AppScope extends InheritedWidget {
     required this.ask,
     required this.inbox,
     required this.meetings,
+    required this.knowledge,
+    required this.integrations,
     required this.engine,
     required super.child,
   });
@@ -39,6 +43,12 @@ class AppScope extends InheritedWidget {
   final AskController ask;
   final InboxController inbox;
   final MeetingSessionManager meetings;
+
+  /// The Knowledge Space (semantic-topographic view of the vault).
+  final KnowledgeController knowledge;
+
+  /// External knowledge sources (Slack/Teams) connection + import state.
+  final IntegrationsController integrations;
 
   /// The single IPC boundary to the Rust engine. Widgets observe [EngineClient.state] for the
   /// connection indicator; features go through it (never around it) to reach the backend.
@@ -60,5 +70,7 @@ class AppScope extends InheritedWidget {
       ask != oldWidget.ask ||
       inbox != oldWidget.inbox ||
       meetings != oldWidget.meetings ||
+      knowledge != oldWidget.knowledge ||
+      integrations != oldWidget.integrations ||
       engine != oldWidget.engine;
 }

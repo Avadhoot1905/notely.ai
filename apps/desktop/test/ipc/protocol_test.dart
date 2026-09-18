@@ -7,7 +7,7 @@ import 'package:notely_desktop/ipc/protocol.dart';
 void main() {
   test('protocol version matches the engine contract', () {
     // Must be bumped in lockstep with PROTOCOL_VERSION in engine/src/ipc/protocol.rs.
-    expect(protocolVersion, 3);
+    expect(protocolVersion, 4);
   });
 
   group('requests serialize to the tagged wire shape', () {
@@ -107,6 +107,61 @@ void main() {
         'type': 'ReprocessMeeting',
         'params': {'meeting_id': 'm1'},
       });
+    });
+
+    test('GetKnowledgeMap carries vault_path', () {
+      expect(const GetKnowledgeMap('/vault').toJson(), {
+        'type': 'GetKnowledgeMap',
+        'params': {'vault_path': '/vault'},
+      });
+    });
+
+    test(
+      'ListSourceChannels carries kind + token; base_url omitted when empty',
+      () {
+        expect(
+          const ListSourceChannels(kind: 'slack', token: 'xoxb-1').toJson(),
+          {
+            'type': 'ListSourceChannels',
+            'params': {'kind': 'slack', 'token': 'xoxb-1'},
+          },
+        );
+      },
+    );
+
+    test('ImportSource carries a bounded scope', () {
+      final req = const ImportSource(
+        kind: 'teams',
+        token: 'g-1',
+        vaultPath: '/vault',
+        scope: ImportScope(channelIds: ['T1/19:abc'], maxMessages: 200),
+      ).toJson();
+      expect(req['type'], 'ImportSource');
+      expect(req['params']['kind'], 'teams');
+      expect(req['params']['vault_path'], '/vault');
+      expect(req['params']['scope'], {
+        'channel_ids': ['T1/19:abc'],
+        'max_messages': 200,
+      });
+    });
+
+    test('ListSources is a bare tag; DisconnectSource carries flags', () {
+      expect(const ListSources().toJson(), {'type': 'ListSources'});
+      expect(
+        const DisconnectSource(
+          kind: 'slack',
+          vaultPath: '/vault',
+          removeImported: true,
+        ).toJson(),
+        {
+          'type': 'DisconnectSource',
+          'params': {
+            'kind': 'slack',
+            'vault_path': '/vault',
+            'remove_imported': true,
+          },
+        },
+      );
     });
   });
 
@@ -244,6 +299,106 @@ void main() {
       expect(list[0].status!.isRetryable, isTrue);
       // A meeting without a stored status decodes with a null status (predates the layer).
       expect(list[1].status, isNull);
+    });
+
+    test('KnowledgeMap decodes regions, concepts, and stats', () {
+      final r = Response.fromJson({
+        'type': 'KnowledgeMap',
+        'data': {
+          'regions': [
+            {
+              'id': 0,
+              'label': 'proxy',
+              'x': 0.5,
+              'y': 0.5,
+              'radius': 0.1,
+              'mass': 3.2,
+              'concept_count': 2,
+              'doc_count': 3,
+              'rank': 0,
+              'sources': ['markdown', 'slack'],
+            },
+          ],
+          'concepts': [
+            {
+              'region_id': 0,
+              'term': 'proxy',
+              'x': 0.5,
+              'y': 0.5,
+              'mass': 3.2,
+              'doc_count': 3,
+              'rank': 0,
+              'sources': ['slack'],
+            },
+          ],
+          'stats': {
+            'note_count': 4,
+            'concept_count': 1,
+            'region_count': 1,
+            'truncated': false,
+          },
+        },
+      });
+      final m = (r as KnowledgeMapResponse).map;
+      expect(m.regions.single.label, 'proxy');
+      expect(m.regions.single.sources, ['markdown', 'slack']);
+      expect(m.concepts.single.term, 'proxy');
+      expect(m.stats.noteCount, 4);
+    });
+
+    test('SourceChannels decodes workspace + channels', () {
+      final r = Response.fromJson({
+        'type': 'SourceChannels',
+        'data': {
+          'workspace': 'Acme',
+          'channels': [
+            {
+              'id': 'C1',
+              'name': 'architecture',
+              'purpose': 'design',
+              'member_count': 12,
+            },
+          ],
+        },
+      });
+      final s = r as SourceChannelsResponse;
+      expect(s.workspace, 'Acme');
+      expect(s.channels.single.name, 'architecture');
+      expect(s.channels.single.memberCount, 12);
+    });
+
+    test('ImportResult decodes a summary', () {
+      final r = Response.fromJson({
+        'type': 'ImportResult',
+        'data': {
+          'channels_imported': 1,
+          'messages_imported': 12,
+          'messages_skipped': 3,
+          'documents_written': 1,
+          'warnings': ['#random: rate limited'],
+        },
+      });
+      final s = (r as ImportResultResponse).summary;
+      expect(s.messagesImported, 12);
+      expect(s.warnings.single, contains('rate limited'));
+    });
+
+    test('Sources decodes connected sources; Ok decodes without data', () {
+      final r = Response.fromJson({
+        'type': 'Sources',
+        'data': [
+          {
+            'kind': 'slack',
+            'workspace': 'Acme',
+            'folder': 'Imported/Slack',
+            'document_count': 2,
+            'imported_channels': ['architecture', 'random'],
+          },
+        ],
+      });
+      expect((r as SourcesResponse).sources.single.workspace, 'Acme');
+      // The Ok unit variant is serialized by serde without a `data` field.
+      expect(Response.fromJson({'type': 'Ok'}), isA<OkResponse>());
     });
 
     test('unknown response type throws ProtocolException', () {

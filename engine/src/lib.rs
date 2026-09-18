@@ -17,12 +17,14 @@ pub mod asr;
 pub mod config;
 pub mod domain;
 pub mod ipc;
+pub mod knowledge_map;
 pub mod llm;
 pub mod media;
 pub mod pipeline;
 pub mod preprocess;
 pub mod renderer;
 pub mod search;
+pub mod sources;
 pub mod storage;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -49,6 +51,10 @@ use crate::pipeline::{
 };
 use crate::renderer::markdown;
 use crate::search::{qa, Passage, SearchIndex};
+use crate::sources::model::{ImportScope, SourceKind};
+use crate::sources::provider::ReqwestTransport;
+use crate::sources::registry::SourceRegistry;
+use crate::sources::Ingestor;
 use crate::storage::{SqliteStore, Store};
 
 /// Capacity of the per-engine event broadcast buffer.
@@ -64,6 +70,8 @@ pub struct Engine {
     llm: Arc<dyn LlmProvider>,
     ai: Arc<dyn AiAnalyzer>,
     search: SearchIndex,
+    /// Imports external knowledge sources (Slack/Teams) into the vault. Holds no secrets.
+    ingestor: Ingestor,
     jobs: JobRegistry,
     orchestrator: Orchestrator,
     events: broadcast::Sender<Event>,
@@ -80,6 +88,11 @@ impl Engine {
         std::fs::create_dir_all(&config.data_dir)?;
         let store: Arc<dyn Store> = Arc::new(SqliteStore::open(config.database_path())?);
         let search = SearchIndex::open(config.search_index_path())?;
+
+        // External knowledge sources (Slack/Teams). The registry is non-secret bookkeeping; the
+        // transport is a plain HTTP client. Tokens are supplied per-request and never stored.
+        let registry = SourceRegistry::open(config.sources_registry_path())?;
+        let ingestor = Ingestor::new(registry, Arc::new(ReqwestTransport::new()));
 
         // Select the LLM runtime (all behind the same provider boundary). Ollama is the default and
         // remains the CUDA/NVIDIA and cross-platform path; MLX is an opt-in Apple-Silicon sibling.
@@ -133,6 +146,7 @@ impl Engine {
             llm,
             ai,
             search,
+            ingestor,
             jobs,
             orchestrator,
             events,
@@ -184,7 +198,169 @@ impl Engine {
             } => self.ask_vault(&question, &vault_path).await,
             Request::ListMeetings => self.list_meetings().await,
             Request::ReprocessMeeting { meeting_id } => self.start_reprocessing(meeting_id),
+            Request::GetKnowledgeMap { vault_path } => self.knowledge_map(&vault_path).await,
+            Request::ListSourceChannels {
+                kind,
+                token,
+                base_url,
+            } => self.list_source_channels(&kind, token, base_url).await,
+            Request::ImportSource {
+                kind,
+                token,
+                base_url,
+                vault_path,
+                scope,
+            } => {
+                self.import_source(&kind, token, base_url, &vault_path, scope)
+                    .await
+            }
+            Request::ListSources => self.list_sources().await,
+            Request::DisconnectSource {
+                kind,
+                vault_path,
+                remove_imported,
+            } => {
+                self.disconnect_source(&kind, &vault_path, remove_imported)
+                    .await
+            }
         }
+    }
+
+    /// Derive the Knowledge Space from the (freshly-synced) vault index. Deterministic and
+    /// LLM-free: concepts and their landscape come from the indexed text, imported Slack/Teams
+    /// notes included, each tagged with its source so the map shows the cross-source shape.
+    async fn knowledge_map(&self, vault_path: &str) -> Response {
+        if let Err(e) = self.search.sync_vault(vault_path.into()).await {
+            tracing::warn!("vault sync failed before knowledge map: {e}");
+        }
+        let chunks = match self.search.all_chunks().await {
+            Ok(c) => c,
+            Err(e) => {
+                return Response::Error {
+                    message: e.to_string(),
+                }
+            }
+        };
+        // Aggregate chunks back into per-note documents, tagged by source kind for provenance.
+        let mut by_path: std::collections::BTreeMap<String, (String, String)> =
+            std::collections::BTreeMap::new();
+        for (path, title, body) in chunks {
+            let entry = by_path
+                .entry(path)
+                .or_insert_with(|| (title.clone(), String::new()));
+            if entry.0.is_empty() {
+                entry.0 = title;
+            }
+            entry.1.push_str(&body);
+            entry.1.push('\n');
+        }
+        let docs: Vec<knowledge_map::MapDoc> = by_path
+            .into_iter()
+            .map(|(path, (title, body))| knowledge_map::MapDoc {
+                source: crate::sources::source_kind_for_path(&path),
+                path,
+                title,
+                body,
+            })
+            .collect();
+        let map = knowledge_map::build(docs, &knowledge_map::MapOptions::default());
+        Response::KnowledgeMap(map)
+    }
+
+    async fn list_source_channels(&self, kind: &str, token: String, base_url: String) -> Response {
+        let Some(kind) = SourceKind::parse(kind) else {
+            return Response::Error {
+                message: format!("unknown source kind: {kind}"),
+            };
+        };
+        match self.ingestor.list_channels(kind, token, base_url).await {
+            Ok((workspace, channels)) => Response::SourceChannels {
+                workspace,
+                channels,
+            },
+            Err(e) => Response::Error {
+                message: e.to_string(),
+            },
+        }
+    }
+
+    async fn import_source(
+        &self,
+        kind: &str,
+        token: String,
+        base_url: String,
+        vault_path: &str,
+        scope: ImportScope,
+    ) -> Response {
+        let Some(kind) = SourceKind::parse(kind) else {
+            return Response::Error {
+                message: format!("unknown source kind: {kind}"),
+            };
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        let summary = match self
+            .ingestor
+            .import(
+                std::path::Path::new(vault_path),
+                kind,
+                token,
+                base_url,
+                scope,
+                &now,
+            )
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                return Response::Error {
+                    message: e.to_string(),
+                }
+            }
+        };
+        // Fold the freshly-written notes into the index so they are immediately searchable/citable.
+        if let Err(e) = self.search.sync_vault(vault_path.into()).await {
+            tracing::warn!("vault sync failed after import: {e}");
+        }
+        self.maybe_spawn_embedding();
+        Response::ImportResult(summary)
+    }
+
+    async fn list_sources(&self) -> Response {
+        match self.ingestor.list_sources().await {
+            Ok(sources) => Response::Sources(sources),
+            Err(e) => Response::Error {
+                message: e.to_string(),
+            },
+        }
+    }
+
+    async fn disconnect_source(
+        &self,
+        kind: &str,
+        vault_path: &str,
+        remove_imported: bool,
+    ) -> Response {
+        let Some(kind) = SourceKind::parse(kind) else {
+            return Response::Error {
+                message: format!("unknown source kind: {kind}"),
+            };
+        };
+        if let Err(e) = self
+            .ingestor
+            .disconnect(std::path::Path::new(vault_path), kind, remove_imported)
+            .await
+        {
+            return Response::Error {
+                message: e.to_string(),
+            };
+        }
+        // Prune removed notes from the index.
+        if remove_imported {
+            if let Err(e) = self.search.sync_vault(vault_path.into()).await {
+                tracing::warn!("vault sync failed after disconnect: {e}");
+            }
+        }
+        Response::Ok
     }
 
     async fn health(&self) -> HealthInfo {

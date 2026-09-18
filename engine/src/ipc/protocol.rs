@@ -5,15 +5,20 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{AskAnswer, Meeting, MeetingId, MeetingSummary, SearchHit, Transcript};
+use crate::domain::{
+    AskAnswer, KnowledgeMap, Meeting, MeetingId, MeetingSummary, SearchHit, Transcript,
+};
 use crate::pipeline::jobs::{Job, JobId};
+use crate::sources::model::{Channel, ConnectedSource, ImportScope, ImportSummary};
 
 /// Bumped on any breaking change to requests, responses, or events. The Dart client must refuse
 /// to talk to an engine with a mismatched major version.
 ///
 /// v2: added vault-wide `Search`/`Ask` requests and `SearchResults`/`Answer` responses.
 /// v3: added `ListMeetings`/`ReprocessMeeting` and the `MeetingList` response (Inbox + retry).
-pub const PROTOCOL_VERSION: u32 = 3;
+/// v4: added the Knowledge Space (`GetKnowledgeMap`) and external sources — Slack/Teams —
+///     (`ListSourceChannels`/`ImportSource`/`ListSources`/`DisconnectSource`).
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Correlates a response with the request that produced it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +91,35 @@ pub enum Request {
     /// Retry AI enrichment for an already-captured meeting from its stored transcript. Idempotent:
     /// reuses the meeting, never re-captures or duplicates. Reports progress via events.
     ReprocessMeeting { meeting_id: MeetingId },
+    /// Derive the Knowledge Space (semantic-topographic map) for the vault at `vault_path`.
+    GetKnowledgeMap { vault_path: String },
+    /// List importable channels/conversations for an external source. `token` is used in-memory
+    /// only and never persisted. `base_url` is optional (empty = provider default).
+    ListSourceChannels {
+        kind: String,
+        token: String,
+        #[serde(default)]
+        base_url: String,
+    },
+    /// Import selected channels from an external source into the vault, then re-index. `token` is
+    /// used in-memory only. Idempotent; reports a summary of what was brought in.
+    ImportSource {
+        kind: String,
+        token: String,
+        #[serde(default)]
+        base_url: String,
+        vault_path: String,
+        scope: ImportScope,
+    },
+    /// List connected sources and what has been imported (non-secret bookkeeping).
+    ListSources,
+    /// Disconnect a source; optionally delete its imported Markdown from the vault.
+    DisconnectSource {
+        kind: String,
+        vault_path: String,
+        #[serde(default)]
+        remove_imported: bool,
+    },
 }
 
 /// Health details.
@@ -122,6 +156,19 @@ pub enum Response {
     Answer(AskAnswer),
     /// Captured meetings + their processing status for a [`Request::ListMeetings`].
     MeetingList(Vec<MeetingSummary>),
+    /// The derived Knowledge Space for a [`Request::GetKnowledgeMap`].
+    KnowledgeMap(KnowledgeMap),
+    /// Importable channels for a [`Request::ListSourceChannels`], plus the resolved workspace label.
+    SourceChannels {
+        workspace: String,
+        channels: Vec<Channel>,
+    },
+    /// The outcome of a [`Request::ImportSource`].
+    ImportResult(ImportSummary),
+    /// Connected sources for a [`Request::ListSources`].
+    Sources(Vec<ConnectedSource>),
+    /// A source-mutating request (import/disconnect) succeeded with nothing else to return.
+    Ok,
     /// The request failed.
     Error {
         message: String,

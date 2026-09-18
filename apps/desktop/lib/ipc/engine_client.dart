@@ -445,6 +445,83 @@ class EngineClient {
     throw _unexpected(resp, 'JobAccepted');
   }
 
+  /// Fetch the Knowledge Space for the vault rooted at [vaultPath]. Deriving concepts can touch the
+  /// whole index, so this uses a slightly more generous timeout than a plain request.
+  Future<KnowledgeMap> knowledgeMap(
+    String vaultPath, {
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    final resp = await send(GetKnowledgeMap(vaultPath), timeout: timeout);
+    if (resp is KnowledgeMapResponse) return resp.map;
+    throw _unexpected(resp, 'KnowledgeMap');
+  }
+
+  /// List importable channels for [kind] ('slack'|'teams') using [token] (kept in-memory only).
+  /// Network + auth can be slow, so this uses a generous timeout.
+  Future<({String workspace, List<SourceChannel> channels})>
+  listSourceChannels({
+    required String kind,
+    required String token,
+    String baseUrl = '',
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    final resp = await send(
+      ListSourceChannels(kind: kind, token: token, baseUrl: baseUrl),
+      timeout: timeout,
+    );
+    if (resp is SourceChannelsResponse) {
+      return (workspace: resp.workspace, channels: resp.channels);
+    }
+    throw _unexpected(resp, 'SourceChannels');
+  }
+
+  /// Import [scope] from an external source into the vault; returns a summary of what was brought in.
+  Future<ImportSummary> importSource({
+    required String kind,
+    required String token,
+    String baseUrl = '',
+    required String vaultPath,
+    required ImportScope scope,
+    Duration timeout = const Duration(seconds: 180),
+  }) async {
+    final resp = await send(
+      ImportSource(
+        kind: kind,
+        token: token,
+        baseUrl: baseUrl,
+        vaultPath: vaultPath,
+        scope: scope,
+      ),
+      timeout: timeout,
+    );
+    if (resp is ImportResultResponse) return resp.summary;
+    throw _unexpected(resp, 'ImportResult');
+  }
+
+  /// List connected sources and what has been imported.
+  Future<List<ConnectedSource>> listSources() async {
+    final resp = await send(const ListSources());
+    if (resp is SourcesResponse) return resp.sources;
+    throw _unexpected(resp, 'Sources');
+  }
+
+  /// Disconnect a source; optionally delete its imported Markdown from the vault.
+  Future<void> disconnectSource({
+    required String kind,
+    required String vaultPath,
+    bool removeImported = false,
+  }) async {
+    final resp = await send(
+      DisconnectSource(
+        kind: kind,
+        vaultPath: vaultPath,
+        removeImported: removeImported,
+      ),
+    );
+    if (resp is OkResponse) return;
+    throw _unexpected(resp, 'Ok');
+  }
+
   Exception _unexpected(Response resp, String expected) {
     if (resp is ErrorResponse) return EngineError(resp.message);
     return ProtocolException(
