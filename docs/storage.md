@@ -16,9 +16,26 @@ Start simple and inspectable, and don't lock into an elaborate schema prematurel
   loss" (see [pipeline.md](pipeline.md)).
 - A lightweight embedded database (SQLite) holds meetings + artifacts keyed by `(meeting_id, kind)`
   (`transcript`, `meeting_ir`, `mom`, `processing_status`), so new artifact kinds need no schema
-  change. A separate, rebuildable `search.db` holds the FTS5 vault index.
+  change (the source of truth, `notely.db`).
 - All of this is confined behind the **`Store` trait** (`storage/repositories/`). Callers use the
   trait; the backend is an implementation detail.
+
+### Derived, rebuildable databases (source-of-truth is never at risk)
+
+Three small SQLite files hold **derived** data — losing any of them only costs a rebuild, so they
+live outside the meeting store:
+
+- **`search.db`** — the vault index. An FTS5 table over Markdown notes (lexical search) plus an
+  optional `embeddings` table (dense vectors for hybrid search). Both are kept in sync incrementally
+  by file fingerprint `(mtime, size)`; embeddings are (re)computed asynchronously and only for
+  changed notes. Hybrid search is opt-in (`NOTELY_LLM_MODEL_EMBEDDING`); without it, `search.db` is
+  FTS5-only exactly as before. See [pipeline.md](pipeline.md).
+- **`jobs.db`** — the persistent job queue. Every job and state transition is mirrored here so
+  background work (enrichment, embedding) survives a crash/restart; the engine requeues anything
+  left `queued`/`running` on startup, bounded by a small retry budget. This is operational metadata,
+  not a distributed queue.
+- **`llm_cache.db`** — the transparent LLM result cache (see [ai-engine.md](ai-engine.md)). Pure
+  speed-up; safe to delete.
 
 A conceptual on-disk layout for a meeting's artifacts:
 

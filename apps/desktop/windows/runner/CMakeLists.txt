@@ -31,6 +31,13 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTT
 # Disable Windows macros that collide with C++ standard library functions.
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 
+# The native runtime pulls in C++/WinRT (winrt/*.h). Under C++17, winrt/base.h
+# includes <experimental/coroutine>, which the VS2022 17.14+/VS2026 MSVC toolchain
+# now rejects with a hard error (STL1011 / C2338) instead of a deprecation warning.
+# We use no WinRT coroutines, so silence the removed-header assertion to keep the
+# C++17 build working across old and new runner images.
+target_compile_definitions(${BINARY_NAME} PRIVATE "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS")
+
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)

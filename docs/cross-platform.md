@@ -54,6 +54,27 @@ implemented in the Rust engine. This is reported honestly through `AudioCapabili
 (`systemAudio: unsupported` with a per-OS note) rather than failing silently. The listening state
 machine treats permission-denied / unavailable audio as coherent UI states, not crashes.
 
+## Inference runtimes
+
+The application pipeline is **platform-independent**: every runtime sits behind `LlmProvider`
+(and `AsrProvider`) in the Rust engine, reached over a process/HTTP boundary, so no OS-specific
+inference logic leaks into the pipeline or the UI.
+
+| Platform | LLM path |
+|---|---|
+| macOS (Apple Silicon) | **Ollama** (Metal) by default, or **MLX** via an external `mlx_lm.server` (`NOTELY_LLM_PROVIDER=mlx`) |
+| Linux / Windows — NVIDIA | **Ollama → CUDA** (Ollama detects the GPU automatically) |
+| Linux / Windows — CPU | **Ollama → CPU** |
+
+- **MLX is macOS-only and opt-in.** It is never linked into the engine; it runs as a separate local
+  HTTP server, mirroring how Ollama and the ASR runtime already work. If it isn't running, the
+  engine defers work rather than failing, and Linux/Windows behavior is unchanged.
+- **No CUDA code lives in Notely.** GPU acceleration on NVIDIA is entirely Ollama's job; the
+  provider boundary leaves room for a future GPU runtime (e.g. vLLM) as just another provider.
+- **Hybrid search, persistent jobs, and the LLM cache are pure SQLite** (bundled `rusqlite`), so
+  they behave identically on all three platforms. Hybrid search is off until an embedding model is
+  configured (`NOTELY_LLM_MODEL_EMBEDDING`).
+
 ## Linux baseline
 
 Primary validation target: **Ubuntu 24.04 LTS · GNOME · Wayland**. The architecture is kept

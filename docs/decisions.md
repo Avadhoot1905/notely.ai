@@ -3,6 +3,39 @@
 A lightweight log of the major v0 architectural decisions. Newest first. Keep entries short:
 what we decided, and why.
 
+## D-0021 — MLX is an opt-in provider behind an HTTP boundary, not linked in; no CUDA in Notely
+Apple-Silicon acceleration is offered via `MlxProvider` (`llm/mlx.rs`) talking to an external
+`mlx_lm.server` (OpenAI-compatible), selected by `NOTELY_LLM_PROVIDER=mlx` — the same
+process/HTTP-boundary pattern as Ollama and ASR. MLX is never linked into the Rust process and is
+macOS-only/opt-in; Linux/Windows keep Ollama unchanged. GPU on NVIDIA stays Ollama→CUDA; Notely
+adds no CUDA/FFI code. The boundary leaves room for a future runtime (vLLM, llama.cpp) with no
+pipeline changes. See [cross-platform.md](cross-platform.md).
+
+## D-0020 — Per-task model routing is configuration, not a framework
+Extraction/synthesis/QA/embedding can each use a different model via
+`NOTELY_LLM_MODEL_{EXTRACTION,SYNTHESIS,QA,EMBEDDING}`. Unset ⇒ the runtime default (current
+behavior). Deterministic and explicit; no agent/router abstraction.
+
+## D-0019 — Hybrid search (FTS5 + embeddings), opt-in and derived
+`search.db` gains an optional dense-vector table fused with FTS5 via reciprocal rank fusion.
+Embeddings are opt-in (`NOTELY_LLM_MODEL_EMBEDDING`) and computed asynchronously for changed notes
+only (fingerprint-derived, self-healing); without a model configured, search is FTS5-only exactly as
+before. Vectors are stored as SQLite BLOBs with brute-force cosine — no native/extension dependency,
+sufficient for a personal vault. Knowledge Space stays derived/rebuildable. See
+[pipeline.md](pipeline.md).
+
+## D-0018 — Jobs are persisted with bounded startup recovery
+The in-memory `JobRegistry` is mirrored to a durable `jobs.db` (`pipeline/job_store.rs`): each
+create/transition is written, and on startup jobs left `queued`/`running` are requeued via the
+idempotent reprocess path, bounded by a small retry budget (unresumable jobs are closed). Not a
+distributed queue — one local table. See [storage.md](storage.md).
+
+## D-0017 — Transparent LLM result cache
+`CachingLlmProvider` (`llm/cache.rs`, `llm_cache.db`) wraps the selected runtime. Identical requests
+(model + prompt + schema + params) skip inference; misses populate on success only (failures never
+poison); an unavailable cache degrades to pass-through. Transparent to extraction/synthesis/QA. See
+[ai-engine.md](ai-engine.md).
+
 ## D-0016 — Deterministic evidence grounding in Rust
 Small models unreliably copy quotes, so Rust matches each extracted item back to its source
 transcript segment and attaches the real quote + timestamps + speaker + `chunk_id`

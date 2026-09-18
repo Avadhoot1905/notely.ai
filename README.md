@@ -106,10 +106,12 @@ Grouped by area, and limited to what actually works in the current tree.
 - **Markdown editor** with debounced autosave that preserves each file's original line endings
   (LF/CRLF) and handles case-only renames on case-insensitive filesystems.
 - **Ask panel**: source-grounded question answering over your stash. The Rust engine keeps an
-  incremental full-text (FTS5) index of your notes on disk, retrieves the most relevant passages,
-  and asks the local LLM to answer **citing only those sources** — every answer links back to the
-  exact note and line range, which you can click to open. If the engine or its LLM isn't running,
-  Ask degrades to offline keyword retrieval rather than failing (AI failure never loses your data).
+  incremental full-text (FTS5) index of your notes on disk — optionally fused with semantic
+  (embedding) retrieval when an embedding model is configured — retrieves the most relevant
+  passages, and asks the local LLM to answer **citing only those sources** — every answer links back
+  to the exact note and line range, which you can click to open. If the engine or its LLM isn't
+  running, Ask degrades to offline keyword retrieval rather than failing (AI failure never loses
+  your data).
 - **Inbox**: captured meetings, each with a clear state — *Ready*, *Processing*, *AI deferred*, or
   *Failed*. Because the transcript (the source) is persisted **before** any AI runs, a capture is
   never lost when the model is unavailable; it lands in the Inbox as *AI deferred* and can be
@@ -131,12 +133,15 @@ Grouped by area, and limited to what actually works in the current tree.
 - A single, runnable Rust engine (`notely-engine`) with graceful shutdown.
 - **Two-pass analysis**: per-chunk extraction → synthesis → validation, with deterministic evidence
   grounding (each decision/action links to a transcript span; owners/deadlines are never invented).
-- **LLM runtime** over Ollama, default `qwen3:1.7b` (configurable via `NOTELY_LLM_MODEL`).
+- **LLM runtime** behind `LlmProvider`, default Ollama with `qwen3:1.7b` (configurable via
+  `NOTELY_LLM_MODEL`); an opt-in MLX path (external `mlx_lm.server`) for Apple Silicon. A
+  transparent result cache and optional per-task model routing sit behind the same boundary.
 - **Qwen3-ASR** speech-recognition provider on a separate HTTP runtime (behind an `AsrProvider`
   trait; Whisper is a stub for now).
 - **FFmpeg** media probing/extraction for audio input.
 - Deterministic **Markdown** and **JSON** renderers (no LLM used to format; HTML is a stub).
-- An orchestrator with jobs, cancellation, and granular per-stage progress events.
+- An orchestrator with **persistent** jobs (requeued on restart), cancellation, and granular
+  per-stage progress events.
 
 ### Infrastructure
 - **Typed IPC** over loopback TCP with a versioned, language-neutral JSON-Schema contract
@@ -153,7 +158,8 @@ Called out honestly so nothing above is misread:
 - Real ASR wired into the *live* listening flow (the engine's ASR path exists; the app currently
   drives summaries from transcript input, and uses a mock transcript during live listening).
 - HTML export, Whisper ASR, and a system-tray relaunch + companion-position persistence on
-  Windows/Linux. (Semantic/embedding search is future work; Ask uses full-text retrieval today.)
+  Windows/Linux. (Hybrid semantic/embedding search now exists but is **opt-in** — set
+  `NOTELY_LLM_MODEL_EMBEDDING`; without it, Ask/Search use full-text retrieval as before.)
 
 ## Architecture
 
@@ -430,20 +436,21 @@ above:
 - Run `./scripts/check.sh` and `./scripts/test.sh` before opening a PR — CI runs the same checks
   plus a desktop build on macOS, Windows, and Linux.
 
-Good first areas: wiring real ASR into the live listening flow, the HTML renderer, semantic
-(embedding) search to complement Ask's full-text retrieval, and on-device QA / hardening for the
-Windows and Linux native runtimes.
+Good first areas: wiring real ASR into the live listening flow, the HTML renderer, tuning the
+hybrid (FTS5 + embedding) search ranking, and on-device QA / hardening for the Windows and Linux
+native runtimes.
 
 ## Roadmap
 
 Directions, not commitments — see the decision log ([`docs/decisions.md`](docs/decisions.md)) and
 open questions ([`docs/research.md`](docs/research.md)) for the reasoning.
 
-- **Current:** local Markdown workspace; source-grounded Ask (engine-side FTS5 retrieval + local
-  LLM, with citations and offline fallback); Inbox with durable capture states + one-click retry
-  (source persisted before AI, so AI failure never loses data); meeting detection + notification +
-  overlay (macOS verified); local two-pass AI pipeline (transcript → Meeting IR → Markdown) proven
-  end-to-end.
+- **Current:** local Markdown workspace; source-grounded Ask (engine-side FTS5 retrieval, optionally
+  hybrid with embeddings, + local LLM, with citations and offline fallback); Inbox with durable
+  capture states + one-click retry (source persisted before AI, so AI failure never loses data);
+  persistent jobs requeued on restart; a transparent LLM result cache and MLX (Apple Silicon) as an
+  opt-in runtime; meeting detection + notification + overlay (macOS verified); local two-pass AI
+  pipeline (transcript → Meeting IR → Markdown) proven end-to-end.
 - **Near-term:** runtime-verify and harden the Windows/Linux native runtimes (incl. tray relaunch
   and companion-position persistence); wire real ASR into live listening; semantic (embedding)
   search alongside Ask's full-text retrieval; HTML export.

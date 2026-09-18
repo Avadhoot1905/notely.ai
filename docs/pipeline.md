@@ -34,9 +34,26 @@ If the input is already a transcript, the media + ASR stages are skipped.
 - Each stage is reached through a **trait or deterministic helper**, never a concrete backend:
   `AsrProvider`, `AiAnalyzer`, `LlmProvider`, `Store`, `preprocess::prepare`, `renderer::markdown`.
 - **Jobs** (`pipeline/jobs.rs`) model a tracked, cancellable run; cancellation is checked between
-  stages and between chunks.
+  stages and between chunks. The in-memory registry is mirrored to a durable store
+  (`pipeline/job_store.rs`, `jobs.db`): each create/transition is persisted, and on startup the
+  engine **requeues** any job left `queued`/`running` when the process died — resuming via the
+  idempotent reprocess path (the source transcript is already safe), bounded by a small retry
+  budget. A job with no resumable transcript is closed, not looped.
+- **LLM cache** is transparent to the pipeline — extraction/synthesis/QA call `LlmProvider` as
+  before; the caching wrapper serves identical requests without inference (see
+  [ai-engine.md](ai-engine.md)).
 
 This keeps the ordering logic stable while implementations are swapped underneath.
+
+## Background indexing (embeddings)
+
+Search runs off the vault's Markdown, which is separate from the meeting pipeline. When the vault is
+synced, FTS5 updates **immediately**; if hybrid search is enabled
+(`NOTELY_LLM_MODEL_EMBEDDING`), embedding of changed notes is kicked off as a **background,
+persisted `Embedding` job** so it never blocks note saving or search results. Failed/interrupted
+embedding is inherently retryable — "what needs embedding" is derived from a fingerprint mismatch,
+so the next search resumes it. Retrieval then fuses FTS5 + vector results (reciprocal rank fusion),
+falling back to FTS5-only whenever embeddings are unavailable.
 
 ## Progress events
 
@@ -84,9 +101,10 @@ Use the LLM only where language understanding is actually required.
 
 - **Implemented:** the orchestrator (`pipeline/orchestrator.rs`) drives create-meeting →
   (transcript) → AI analyze → render → store, emitting events and honoring cancellation between
-  stages; the in-memory job registry (`pipeline/jobs.rs`); the AI, storage (SQLite), and Markdown
-  renderer stages. The **transcript → Meeting IR → Markdown → storage** path is proven end-to-end
-  against Ollama/Qwen (`engine/tests/ollama_smoke.rs`).
+  stages; the job registry (`pipeline/jobs.rs`) with durable persistence + startup recovery
+  (`pipeline/job_store.rs`); the AI, storage (SQLite), and Markdown renderer stages; hybrid
+  vault search with background embedding jobs. The **transcript → Meeting IR → Markdown → storage**
+  path is proven end-to-end against Ollama/Qwen (`engine/tests/ollama_smoke.rs`).
 - **Scaffolded / not wired end-to-end:** the **audio → media → ASR** path. `media` (FFmpeg) is
   implemented and `asr` has a real trait + fixture provider, but the Whisper backend returns
   "not implemented", so audio input currently ends in a clean error, not a transcript.

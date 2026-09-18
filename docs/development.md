@@ -19,9 +19,17 @@ The engine reads these environment variables (all optional; see `.env.example` a
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `NOTELY_LLM_PROVIDER` | `ollama` | LLM runtime: `ollama` (cross-platform) \| `mlx` (macOS, opt-in) |
 | `NOTELY_OLLAMA_URL` | `http://localhost:11434` | Ollama (LLM) base URL |
 | `NOTELY_LLM_MODEL` | `qwen3:1.7b` | LLM model tag (legacy alias: `NOTELY_OLLAMA_MODEL`) |
 | `NOTELY_OLLAMA_TIMEOUT_SECS` | `180` | per-generation timeout |
+| `NOTELY_MLX_URL` | `http://localhost:8080` | External MLX-LM server URL (used only when provider=`mlx`) |
+| `NOTELY_MLX_MODEL` | = `NOTELY_LLM_MODEL` | MLX model tag |
+| `NOTELY_MLX_TIMEOUT_SECS` | `180` | MLX per-generation timeout |
+| `NOTELY_LLM_MODEL_EXTRACTION` | (runtime default) | Per-task model override for extraction |
+| `NOTELY_LLM_MODEL_SYNTHESIS` | (runtime default) | Per-task model override for synthesis |
+| `NOTELY_LLM_MODEL_QA` | (runtime default) | Per-task model override for Ask/QA |
+| `NOTELY_LLM_MODEL_EMBEDDING` | (unset ⇒ off) | Embedding model; **setting it turns on hybrid search** |
 | `NOTELY_ASR_PROVIDER` | `qwen3-asr` | ASR provider: `qwen3-asr` \| `whisper` \| `fixture` |
 | `NOTELY_ASR_URL` | `http://localhost:9000` | Qwen3-ASR runtime base URL (separate from Ollama) |
 | `NOTELY_ASR_MODEL` | `qwen3-asr` | ASR model id |

@@ -1,0 +1,104 @@
+name: Release
+
+# Publishes desktop builds for all three platforms to a GitHub Release.
+# Triggered by pushing a version tag, e.g.:
+#   git tag v1.2.0 && git push origin v1.2.0
+# Each platform is built in --release mode, archived, and attached to a
+# Release named after the tag. CI (.github/workflows/ci.yml) still gates
+# every push to main separately; this workflow only runs on tags.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Needed for softprops/action-gh-release to create the Release and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - name: Archive Windows build
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath notely-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: apps/desktop/notely-windows-x64.zip
+          if-no-files-found: error
+
+  build-linux:
+    name: Build (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake clang pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter build linux --release
+      - name: Archive Linux build
+        run: tar -czf notely-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: apps/desktop/notely-linux-x64.tar.gz
+          if-no-files-found: error
+
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter build macos --release
+      # Ad-hoc signed only (no Developer ID / notarization), so first launch
+      # needs a right-click → Open. ditto preserves the .app bundle correctly.
+      - name: Archive macOS build
+        run: ditto -c -k --sequesterRsrc --keepParent "build/macos/Build/Products/Release/notely.ai.app" notely-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: apps/desktop/notely-macos.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish Release
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -14,8 +14,9 @@ Flutter Desktop App
         ├── asr/         speech recognition (Qwen3-ASR default, separate runtime)
         ├── preprocess/  deterministic normalization + chunking (Rust)
         ├── ai/          semantic analysis (extraction / synthesis / validation)
-        ├── llm/         LLM runtime (Ollama → Qwen3 1.7B)
-        ├── storage/     local persistence (SQLite)
+        ├── llm/         LLM runtime behind LlmProvider (Ollama default | MLX macOS) + result cache
+        ├── search/      vault index + Ask: FTS5 (+ optional embeddings) → hybrid retrieval
+        ├── storage/     local persistence (SQLite: meetings; derived search/jobs/cache DBs)
         └── renderer/    Meeting IR → Markdown / HTML / JSON
 ```
 
@@ -96,7 +97,8 @@ The workspace is set up so we *can* split later — but we don't pay for that no
 | `asr`       | `AsrProvider` abstraction + Qwen3-ASR (default) / Whisper (optional)  | Flutter             |
 | `preprocess`| Deterministic transcript normalization + chunking                    | LLMs / providers    |
 | `ai`        | Two-pass semantic analysis over domain types                         | which runtime serves the model |
-| `llm`       | `LlmProvider` runtime abstraction + Ollama impl                       | meeting semantics   |
+| `llm`       | `LlmProvider` (generate/health/embed) + Ollama/MLX impls + result cache | meeting semantics |
+| `search`    | Vault FTS5 (+ optional embeddings) hybrid retrieval + grounded Ask    | Flutter             |
 | `storage`   | Local persistence behind repository traits                            | Flutter             |
 | `renderer`  | Deterministic IR → Markdown/HTML/JSON                                 | LLMs                |
 

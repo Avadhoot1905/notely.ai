@@ -13,8 +13,9 @@ system stay model-agnostic and produce traceable output.
                 ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ LLM runtime              (engine/src/llm)                   │
-│   LlmProvider: generate(request) -> response                │
-│   Ollama today; llama.cpp / others later                    │
+│   LlmProvider: generate · health · embed                    │
+│   CachingLlmProvider  (transparent SQLite result cache)     │
+│     └── Ollama (default, cross-platform) | MLX (macOS)      │
 └───────────────┬─────────────────────────────────────────────┘
                 │ runs
                 ▼
@@ -46,9 +47,33 @@ inference runs through Ollama, llama.cpp, or anything else.
 
 ## LLM runtime (`llm/`)
 
-Owns *how* a model is executed, behind `LlmProvider`. Ollama is the v0 target. `provider` (the
-runtime) and `model` (which model + settings) are separate concepts so a model can be re-pointed
-at a different runtime without touching callers.
+Owns *how* a model is executed, behind `LlmProvider`. `provider` (the runtime) and `model` (which
+model + settings) are separate concepts so a model can be re-pointed at a different runtime without
+touching callers.
+
+The trait exposes exactly the capabilities Notely needs — `generate`, `health`, and `embed` (batch
+embeddings for hybrid search). `embed` is defaulted to `Unsupported`, so a runtime opts in only if
+it truly embeds; callers degrade gracefully otherwise.
+
+**Runtimes** (all behind the same trait, selected by `NOTELY_LLM_PROVIDER`):
+
+- **Ollama** (`llm/ollama.rs`, default) — the cross-platform path. Uses CUDA on NVIDIA and Metal on
+  macOS automatically; implements `generate`/`health`/`embed` (`/api/embed`).
+- **MLX** (`llm/mlx.rs`, opt-in `mlx`) — an Apple-Silicon path. MLX is **never linked into the
+  process**; like Ollama and ASR it runs as a *separate local HTTP server* (`mlx_lm.server`,
+  OpenAI-compatible). An unreachable server just defers work — it never crashes, and Linux/Windows
+  are unaffected. A future GPU runtime (e.g. vLLM) would slot in the same way.
+
+**Result cache** (`llm/cache.rs`) — `CachingLlmProvider` transparently wraps the chosen runtime.
+Identical requests (same model + prompt + schema + params) skip inference; misses populate on
+**success only** (a failed generation never poisons the cache); an unavailable cache degrades to
+plain pass-through. Extraction/synthesis/QA are unaware it exists. Backed by its own rebuildable
+`llm_cache.db`.
+
+**Per-task model routing** — extraction, synthesis, QA, and embedding can each use a different
+model (`NOTELY_LLM_MODEL_EXTRACTION`/`_SYNTHESIS`/`_QA`/`_EMBEDDING`). Unset means "use the runtime
+default", so nothing changes unless you opt in. This is plain configuration, not a routing
+framework.
 
 ## Model / provider
 
@@ -94,9 +119,11 @@ does the trustworthy work:
 - **Implemented & proven end-to-end** against real local **Qwen3 1.7B** (`ollama_smoke.rs`):
   per-chunk extraction → synthesis → validation → grounded, provenance-linked Meeting IR.
 - **Model is configurable** (`NOTELY_LLM_MODEL`) — benchmark `qwen3:0.6b` / `qwen3:4b` without
-  touching the pipeline.
-- **Scaffolded / planned:** a distinct verified-mode critique pass and additional runtimes behind
-  `LlmProvider` (llama.cpp, …).
+  touching the pipeline. Per-task overrides route extraction/synthesis/QA/embedding independently.
+- **Runtimes behind `LlmProvider`:** Ollama (default) and MLX (opt-in, macOS) ship today; a
+  transparent result cache wraps whichever is selected. Further runtimes (llama.cpp, vLLM, …) can
+  be added without touching the pipeline.
+- **Scaffolded / planned:** a distinct verified-mode critique pass.
 
 The schemas are owned by Rust (`ai/schema.rs`) and mirror the domain types — the model fills them
 in, it does not define them.
