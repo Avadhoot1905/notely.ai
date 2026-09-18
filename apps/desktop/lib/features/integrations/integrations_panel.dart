@@ -13,13 +13,18 @@ import '../../ipc/protocol.dart' as ipc;
 import 'integrations_state.dart';
 
 class IntegrationsDialog extends StatelessWidget {
-  const IntegrationsDialog({super.key});
+  const IntegrationsDialog({super.key, required this.controller});
+
+  /// The controller is captured from the calling context and passed in, because `showDialog` mounts
+  /// this above `AppScope` (at the root Navigator/Overlay), where `AppScope.of` would fail.
+  final IntegrationsController controller;
 
   static Future<void> show(BuildContext context) {
+    final controller = AppScope.of(context).integrations;
     return showDialog<void>(
       context: context,
       barrierColor: context.tokens.overlayScrim,
-      builder: (_) => const IntegrationsDialog(),
+      builder: (_) => IntegrationsDialog(controller: controller),
     );
   }
 
@@ -34,7 +39,7 @@ class IntegrationsDialog extends StatelessWidget {
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520, maxHeight: 620),
-        child: const _IntegrationsBody(),
+        child: _IntegrationsBody(controller: controller),
       ),
     );
   }
@@ -43,7 +48,9 @@ class IntegrationsDialog extends StatelessWidget {
 enum _Step { overview, connect, pick, done }
 
 class _IntegrationsBody extends StatefulWidget {
-  const _IntegrationsBody();
+  const _IntegrationsBody({required this.controller});
+
+  final IntegrationsController controller;
 
   @override
   State<_IntegrationsBody> createState() => _IntegrationsBodyState();
@@ -64,7 +71,7 @@ class _IntegrationsBodyState extends State<_IntegrationsBody> {
   int _maxMessages = 500;
   ipc.ImportSummary? _summary;
 
-  IntegrationsController get _c => AppScope.of(context).integrations;
+  IntegrationsController get _c => widget.controller;
 
   @override
   void initState() {
