@@ -27,36 +27,52 @@ const _outgoing = MethodChannel('notely/companion/outgoing');
 
 class _CompanionSnapshot {
   const _CompanionSnapshot({
+    required this.status,
     required this.paused,
     required this.elapsedSeconds,
     required this.lines,
+    this.partial,
     this.meetingTitle,
   });
 
+  final String status; // idle | listening | paused | processing | stopped
   final bool paused;
   final int elapsedSeconds;
   final List<Map<String, String>> lines;
+  final Map<String, String>? partial;
   final String? meetingTitle;
+
+  static Map<String, String> _line(Map l) => {
+    'speaker': '${l['speaker'] ?? ''}',
+    'time': '${l['time'] ?? ''}',
+    'text': '${l['text'] ?? ''}',
+  };
 
   factory _CompanionSnapshot.fromMap(Map<dynamic, dynamic> m) {
     final rawLines = (m['lines'] as List?) ?? const [];
+    final rawPartial = m['partial'];
     return _CompanionSnapshot(
+      status:
+          (m['status'] as String?) ??
+          (m['paused'] == true ? 'paused' : 'listening'),
       paused: m['paused'] == true,
       elapsedSeconds: (m['elapsedSeconds'] as int?) ?? 0,
       meetingTitle: m['meetingTitle'] as String?,
-      lines: rawLines
-          .whereType<Map>()
-          .map(
-            (l) => {
-              'speaker': '${l['speaker'] ?? ''}',
-              'time': '${l['time'] ?? ''}',
-              'text': '${l['text'] ?? ''}',
-            },
-          )
-          .toList(),
+      partial: rawPartial is Map ? _line(rawPartial) : null,
+      lines: rawLines.whereType<Map>().map(_line).toList(),
     );
   }
 }
+
+/// Status → (headline, indicator color, whether the dot pulses).
+({String label, Color color, bool pulse}) _statusStyle(String status) =>
+    switch (status) {
+      'paused' => (label: 'Notely paused', color: _warning, pulse: false),
+      'processing' => (label: 'Processing…', color: _accent, pulse: false),
+      'stopped' => (label: 'Stopped', color: _textFaint, pulse: false),
+      'idle' => (label: 'Notely', color: _textFaint, pulse: false),
+      _ => (label: 'Notely is listening', color: _recording, pulse: true),
+    };
 
 class _CompanionApp extends StatefulWidget {
   const _CompanionApp();
@@ -67,6 +83,7 @@ class _CompanionApp extends StatefulWidget {
 
 class _CompanionAppState extends State<_CompanionApp> {
   _CompanionSnapshot _snap = const _CompanionSnapshot(
+    status: 'listening',
     paused: false,
     elapsedSeconds: 0,
     lines: [],
@@ -98,28 +115,47 @@ class _CompanionAppState extends State<_CompanionApp> {
         scaffoldBackgroundColor: Colors.transparent,
         canvasColor: Colors.transparent,
       ),
-      home: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: Align(
-          alignment: Alignment.topLeft,
-          child: _expanded
-              ? _Popover(
-                  snap: _snap,
-                  onPause: () => _send(_snap.paused ? 'resume' : 'pause'),
-                  onStop: () => _send('stop'),
-                  onOpen: () => _send('openInNotely'),
-                  onCollapse: () => _send('collapse'),
-                )
-              : _Pill(
-                  snap: _snap,
-                  onTap: () => _send('expand'),
-                  // macOS drags the panel natively (movable-by-background); Windows/Linux need the
-                  // UI to initiate the native window move via a command.
-                  onDragStart: defaultTargetPlatform == TargetPlatform.macOS
-                      ? null
-                      : () => _send('beginDrag'),
-                ),
-        ),
+      home: Builder(
+        builder: (context) {
+          final reduceMotion = MediaQuery.of(context).disableAnimations;
+          return Scaffold(
+            backgroundColor: Colors.transparent,
+            // Hover is the core interaction: entering the window expands, leaving collapses —
+            // reusing the native window's expand/collapse resize (no focus stealing; the panel is
+            // non-activating). Tap still expands as a fallback.
+            body: MouseRegion(
+              onEnter: (_) {
+                if (!_expanded) _send('expand');
+              },
+              onExit: (_) {
+                if (_expanded) _send('collapse');
+              },
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: _expanded
+                    ? _Popover(
+                        snap: _snap,
+                        reduceMotion: reduceMotion,
+                        onPause: () => _send(_snap.paused ? 'resume' : 'pause'),
+                        onStop: () => _send('stop'),
+                        onOpen: () => _send('openInNotely'),
+                        onCollapse: () => _send('collapse'),
+                      )
+                    : _Pill(
+                        snap: _snap,
+                        reduceMotion: reduceMotion,
+                        onTap: () => _send('expand'),
+                        // macOS drags the panel natively (movable-by-background); Windows/Linux
+                        // need the UI to initiate the native window move via a command.
+                        onDragStart:
+                            defaultTargetPlatform == TargetPlatform.macOS
+                            ? null
+                            : () => _send('beginDrag'),
+                      ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -145,57 +181,68 @@ const _textSecondary = Color(0xFFA0A6B0);
 const _textFaint = Color(0xFF6C727C);
 
 class _Pill extends StatelessWidget {
-  const _Pill({required this.snap, required this.onTap, this.onDragStart});
+  const _Pill({
+    required this.snap,
+    required this.onTap,
+    this.onDragStart,
+    this.reduceMotion = false,
+  });
   final _CompanionSnapshot snap;
   final VoidCallback onTap;
   final VoidCallback? onDragStart;
+  final bool reduceMotion;
 
   @override
   Widget build(BuildContext context) {
-    final color = snap.paused ? _warning : _recording;
-    return Padding(
-      padding: const EdgeInsets.all(6),
-      child: GestureDetector(
-        onTap: onTap,
-        onPanStart: onDragStart == null ? null : (_) => onDragStart!(),
-        child: Container(
-          height: 40,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            color: _raised,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _border),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x66000000),
-                blurRadius: 16,
-                offset: Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _Dot(color: color, pulse: !snap.paused),
-              const SizedBox(width: 9),
-              Text(
-                snap.paused ? 'Notely paused' : 'Notely is listening',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: _textPrimary,
+    final style = _statusStyle(snap.status);
+    return Semantics(
+      button: true,
+      label:
+          '${style.label}. ${_fmt(snap.elapsedSeconds)} elapsed. Hover or activate to expand the Notely companion.',
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: GestureDetector(
+          onTap: onTap,
+          onPanStart: onDragStart == null ? null : (_) => onDragStart!(),
+          child: Container(
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              color: _raised,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _border),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x66000000),
+                  blurRadius: 16,
+                  offset: Offset(0, 5),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                _fmt(snap.elapsedSeconds),
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                  color: _textSecondary,
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _Dot(color: style.color, pulse: style.pulse && !reduceMotion),
+                const SizedBox(width: 9),
+                Text(
+                  style.label,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: _textPrimary,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 10),
+                Text(
+                  _fmt(snap.elapsedSeconds),
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                    color: _textSecondary,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -210,16 +257,25 @@ class _Popover extends StatelessWidget {
     required this.onStop,
     required this.onOpen,
     required this.onCollapse,
+    this.reduceMotion = false,
   });
   final _CompanionSnapshot snap;
   final VoidCallback onPause;
   final VoidCallback onStop;
   final VoidCallback onOpen;
   final VoidCallback onCollapse;
+  final bool reduceMotion;
 
   @override
   Widget build(BuildContext context) {
-    final color = snap.paused ? _warning : _recording;
+    final style = _statusStyle(snap.status);
+    final items = <Widget>[
+      for (final l in snap.lines) _lineTile(l),
+      if (snap.partial != null) _lineTile(snap.partial!, partial: true),
+    ];
+    final emptyText = snap.status == 'paused'
+        ? 'Paused'
+        : 'Waiting for speech…';
     return Padding(
       padding: const EdgeInsets.all(6),
       child: Container(
@@ -244,14 +300,17 @@ class _Popover extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
               child: Row(
                 children: [
-                  _Dot(color: color, pulse: !snap.paused),
+                  _Dot(color: style.color, pulse: style.pulse && !reduceMotion),
                   const SizedBox(width: 9),
-                  Text(
-                    snap.meetingTitle ?? (snap.paused ? 'Paused' : 'Listening'),
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: _textPrimary,
+                  Flexible(
+                    child: Text(
+                      snap.meetingTitle ?? style.label,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: _textPrimary,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -259,71 +318,39 @@ class _Popover extends StatelessWidget {
                     _fmt(snap.elapsedSeconds),
                     style: const TextStyle(
                       fontSize: 11.5,
+                      fontFeatures: [FontFeature.tabularFigures()],
                       color: _textSecondary,
                     ),
                   ),
                   const Spacer(),
-                  _IconBtn(icon: Icons.close_rounded, onTap: onCollapse),
+                  _IconBtn(
+                    icon: Icons.close_rounded,
+                    semanticLabel: 'Collapse companion',
+                    onTap: onCollapse,
+                  ),
                 ],
               ),
             ),
             const Divider(height: 1, color: _border),
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 240),
-              child: snap.lines.isEmpty
-                  ? const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 28),
+              child: items.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 28),
                       child: Center(
                         child: Text(
-                          'Waiting for speech…',
-                          style: TextStyle(fontSize: 12, color: _textFaint),
+                          emptyText,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: _textFaint,
+                          ),
                         ),
                       ),
                     )
-                  : ListView.builder(
+                  : ListView(
                       shrinkWrap: true,
                       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                      itemCount: snap.lines.length,
-                      itemBuilder: (context, i) {
-                        final l = snap.lines[i];
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    l['speaker'] ?? '',
-                                    style: const TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: _accent,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 7),
-                                  Text(
-                                    l['time'] ?? '',
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      color: _textFaint,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                l['text'] ?? '',
-                                style: const TextStyle(
-                                  fontSize: 12.5,
-                                  height: 1.4,
-                                  color: _textPrimary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                      children: items,
                     ),
             ),
             const Divider(height: 1, color: _border),
@@ -394,48 +421,103 @@ class _ActionBtn extends StatelessWidget {
         : danger
         ? _recording
         : _textPrimary;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 32,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: filled ? Colors.transparent : _border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: fg),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: fg,
+    return Semantics(
+      button: true,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 32,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: filled ? Colors.transparent : _border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: fg,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
+/// A finalized or partial transcript tile. Partials render dimmed + italic ("visually mutable")
+/// so a user sees speech settling; when a partial becomes final it replaces this cleanly (the
+/// projection moves it from `partial` into `lines`, so there is no duplication).
+Widget _lineTile(Map<String, String> l, {bool partial = false}) {
+  final speaker = l['speaker'] ?? '';
+  final time = l['time'] ?? '';
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (speaker.isNotEmpty || time.isNotEmpty)
+          Row(
+            children: [
+              if (speaker.isNotEmpty) ...[
+                Text(
+                  speaker,
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: _accent,
+                  ),
+                ),
+                const SizedBox(width: 7),
+              ],
+              Text(
+                time,
+                style: const TextStyle(fontSize: 10, color: _textFaint),
+              ),
+            ],
+          ),
+        const SizedBox(height: 2),
+        Text(
+          l['text'] ?? '',
+          style: TextStyle(
+            fontSize: 12.5,
+            height: 1.4,
+            color: partial ? _textSecondary : _textPrimary,
+            fontStyle: partial ? FontStyle.italic : FontStyle.normal,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _IconBtn extends StatelessWidget {
-  const _IconBtn({required this.icon, required this.onTap});
+  const _IconBtn({required this.icon, required this.onTap, this.semanticLabel});
   final IconData icon;
   final VoidCallback onTap;
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.all(6),
-        child: Icon(icon, size: 15, color: _textFaint),
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(icon, size: 15, color: _textFaint),
+        ),
       ),
     );
   }

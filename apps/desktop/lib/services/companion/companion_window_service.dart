@@ -17,23 +17,37 @@ import 'package:flutter/services.dart';
 @immutable
 class CompanionSnapshot {
   const CompanionSnapshot({
+    required this.status,
     required this.paused,
     required this.elapsedSeconds,
     required this.lines,
+    this.partial,
     this.meetingTitle,
   });
 
+  /// Coarse meeting status the pill/popover renders: `idle`|`listening`|`paused`|`processing`|`stopped`.
+  /// Serializable string (crosses the native boundary); mirrors [LiveMeetingState]'s status.
+  final String status;
+
+  /// Retained for the collapsed pill's paused affordance and back-compat. Derived from [status].
   final bool paused;
   final int elapsedSeconds;
 
-  /// Recent transcript lines: each `{speaker, time, text}`.
+  /// Finalized transcript lines, oldest→newest: each `{speaker, time, text}`.
   final List<Map<String, String>> lines;
+
+  /// The in-progress (partial) line, if the ASR engine emits partials — rendered as visually
+  /// mutable beneath the finalized lines. Null with the current mock (final-only), by design.
+  final Map<String, String>? partial;
+
   final String? meetingTitle;
 
   Map<String, dynamic> toMap() => {
+    'status': status,
     'paused': paused,
     'elapsedSeconds': elapsedSeconds,
     'lines': lines,
+    if (partial != null) 'partial': partial,
     if (meetingTitle != null) 'meetingTitle': meetingTitle,
   };
 }

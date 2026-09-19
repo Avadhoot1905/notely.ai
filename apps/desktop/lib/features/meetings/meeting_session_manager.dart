@@ -29,6 +29,7 @@ import '../../services/meetings/meeting_settings.dart';
 import '../../services/notifications/notification_service.dart';
 import '../../services/platform/platform_capabilities.dart';
 import '../listening/listening_state.dart';
+import 'companion_controller.dart';
 
 enum MeetingRuntimeState { notRunning, awaitingDecision, tracking, finalizing }
 
@@ -47,12 +48,23 @@ class MeetingSessionManager extends ChangeNotifier {
        _listening = listening,
        _settings = settings,
        _resolveActiveFile = resolveActiveFile,
-       _onOpenInNotely = onOpenInNotely;
+       _onOpenInNotely = onOpenInNotely {
+    // The companion is a projection of THIS session's live meeting state — it owns only its own
+    // presentation state, never a second copy of the meeting.
+    _companionController = CompanionController(
+      window: _companion,
+      source: _listening,
+      liveState: () => _listening.liveState,
+      elapsed: () => _listening.elapsed,
+      title: () => _active?.title ?? _active?.provider.displayName,
+    );
+  }
 
   final MeetingDetector _detector;
   final NotificationService _notifications;
   final CompanionWindowService _companion;
   final ListeningController _listening;
+  late final CompanionController _companionController;
 
   MeetingDetectionSettings _settings;
   final String? Function()? _resolveActiveFile;
@@ -80,7 +92,6 @@ class MeetingSessionManager extends ChangeNotifier {
   StreamSubscription<MeetingEndedEvent>? _endSub;
   StreamSubscription<NotificationAction>? _actionSub;
   StreamSubscription<CompanionCommand>? _cmdSub;
-  Timer? _companionTick;
 
   MeetingRuntimeState _state = MeetingRuntimeState.notRunning;
   MeetingDetectedEvent? _awaiting; // shown a notification, not yet answered
@@ -132,9 +143,9 @@ class MeetingSessionManager extends ChangeNotifier {
     if (_capabilities.companionOverlay &&
         _state == MeetingRuntimeState.tracking) {
       if (settings.showCompanion) {
-        await _companion.show();
+        await _companionController.show();
       } else {
-        await _companion.hide();
+        await _companionController.hide();
       }
     }
     notifyListeners();
@@ -199,12 +210,8 @@ class MeetingSessionManager extends ChangeNotifier {
     await _listening.start(activeFilePath: _resolveActiveFile?.call());
 
     if (_settings.showCompanion && _capabilities.companionOverlay) {
-      await _companion.show();
-      await _pushSnapshot();
-      _companionTick = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => _pushSnapshot(),
-      );
+      // The controller pushes the live-state projection reactively and ticks the elapsed clock.
+      await _companionController.show();
     }
   }
 
@@ -225,11 +232,9 @@ class MeetingSessionManager extends ChangeNotifier {
     _state = MeetingRuntimeState.finalizing;
     notifyListeners();
 
-    _companionTick?.cancel();
-    _companionTick = null;
     await _listening
         .stop(); // → Reviewing; transcript retained for persistence.
-    await _companion.hide();
+    await _companionController.hide();
 
     final key = _active?.meetingKey;
     if (key != null) {
@@ -257,34 +262,17 @@ class MeetingSessionManager extends ChangeNotifier {
 
   // ── Session → companion sync ─────────────────────────────────────────────
   void _onListeningChanged() {
-    // If tracking but the session ended via the main UI (idle/reviewing), reconcile.
+    // If tracking but the session ended via the main UI (idle/reviewing), reconcile. Snapshot
+    // pushes are handled reactively by the CompanionController (it listens to the same session).
     if (_state == MeetingRuntimeState.tracking &&
         !(_listening.isListening || _listening.isPaused)) {
       _finalize();
-      return;
     }
-    if (_state == MeetingRuntimeState.tracking) _pushSnapshot();
-  }
-
-  Future<void> _pushSnapshot() async {
-    if (_state != MeetingRuntimeState.tracking) return;
-    final entries = _listening.entries;
-    final lines = entries
-        .map((e) => {'speaker': e.speaker, 'time': e.time, 'text': e.text})
-        .toList(growable: false);
-    await _companion.update(
-      CompanionSnapshot(
-        paused: _listening.isPaused,
-        elapsedSeconds: _listening.elapsed.inSeconds,
-        lines: lines,
-        meetingTitle: _active?.title ?? _active?.provider.displayName,
-      ),
-    );
   }
 
   @override
   void dispose() {
-    _companionTick?.cancel();
+    _companionController.dispose();
     _detSub?.cancel();
     _endSub?.cancel();
     _actionSub?.cancel();
