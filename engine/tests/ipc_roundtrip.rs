@@ -101,6 +101,21 @@ async fn health_and_error_paths_over_the_socket() {
         other => panic!("expected SearchResults, got {other:?}"),
     }
 
+    // TranscribeChunk: the new v5 request round-trips and degrades honestly. A nonexistent path can't
+    // be normalized/transcribed, so it returns a clean Error (never a hang/crash) — proving dispatch
+    // reaches the media+ASR seam without needing FFmpeg or a live ASR runtime here.
+    let resp = send_request(
+        &mut stream,
+        Request::TranscribeChunk {
+            path: std::env::temp_dir()
+                .join("notely-no-such-chunk.wav")
+                .to_string_lossy()
+                .to_string(),
+        },
+    )
+    .await;
+    assert!(matches!(resp.response, Response::Error { .. }));
+
     shutdown_tx.send(()).ok();
     handle.await.unwrap();
 }

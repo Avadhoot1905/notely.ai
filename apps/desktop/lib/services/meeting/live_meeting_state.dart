@@ -78,6 +78,12 @@ class LiveMeetingStateController extends ChangeNotifier {
           transcript: [..._state.transcript, segment],
           clearPartial: true,
         );
+      case TranscriptReplaced(:final segments):
+        _state = _state._copy(
+          elapsed: event.at,
+          transcript: List.unmodifiable(segments),
+          clearPartial: true,
+        );
       case AudioHealthChanged(:final health):
         _state = _state._copy(audioHealth: health);
     }

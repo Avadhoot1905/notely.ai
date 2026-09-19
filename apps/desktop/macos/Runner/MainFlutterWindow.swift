@@ -397,9 +397,18 @@ final class CompanionController: NSObject {
 
   private func show() {
     if panel == nil { build() }
-    guard let panel = panel else { return }
+    guard let panel = panel else {
+      NSLog("[companion] show: panel is nil after build() — nothing to order front")
+      return
+    }
     positionIfNeeded(panel)
     panel.orderFrontRegardless()  // show WITHOUT activating Notely / stealing focus
+    // TEMPORARY diagnostic: the panel is fully transparent, so all visible pixels come from the
+    // companion FlutterEngine. If this logs a sane on-screen frame + isVisible=true but you still
+    // see nothing, the second engine (companionMain) is rendering blank — look for its logs.
+    NSLog(
+      "[companion] show: frame=\(NSStringFromRect(panel.frame)) level=\(panel.level.rawValue) "
+        + "visible=\(panel.isVisible) screens=\(NSScreen.screens.count)")
     if let snap = lastSnapshot { incoming?.invokeMethod("update", arguments: snap) }
   }
 
@@ -415,9 +424,21 @@ final class CompanionController: NSObject {
   }
 
   private func build() {
+    // The companion UI (`companionMain`) lives in a SEPARATE Dart library, and macOS's FlutterEngine
+    // can't select an entrypoint by name across libraries. Instead, run the DEFAULT `main` entrypoint
+    // with the companion flag as a Dart entrypoint argument — main.dart dispatches that to
+    // companionMain(). (Same mechanism the Linux embedder uses.) Without this the engine boots the
+    // FULL app — with no plugins registered — inside the companion engine (the MissingPlugin flood).
+    let project = FlutterDartProject()
+    project.dartEntrypointArguments = ["--notely-companion"]
+    // allowHeadlessExecution: run the engine BEFORE a view controller exists (we attach one right
+    // after). With this false the run is refused ("no view controller … without headless mode") and
+    // returns false; true lets companionMain() boot deterministically, then the VC renders into it.
     let engine = FlutterEngine(
-      name: "notely_companion", project: nil, allowHeadlessExecution: false)
-    engine.run(withEntrypoint: "companionMain")
+      name: "notely_companion", project: project, allowHeadlessExecution: true)
+    let started = engine.run(withEntrypoint: nil)  // default `main`, dispatched to companionMain()
+    // TEMPORARY diagnostic: if started=false the companion engine never booted (blank overlay).
+    NSLog("[companion] build: companion engine started=\(started)")
     self.engine = engine
 
     let vc = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
@@ -427,6 +448,10 @@ final class CompanionController: NSObject {
       styleMask: [.nonactivatingPanel, .borderless],
       backing: .buffered, defer: false)
     panel.contentViewController = vc
+    // Assigning a contentViewController makes AppKit resize the panel to the view controller's view,
+    // which is 0×0 until Flutter renders — collapsing this (transparent) overlay to nothing on screen
+    // (observed: frame size {0,0}). Force the intended pill size back after attaching the VC.
+    panel.setContentSize(Self.pillSize)
     panel.isOpaque = false
     panel.backgroundColor = .clear
     panel.hasShadow = false
@@ -513,14 +538,25 @@ final class CompanionController: NSObject {
       let candidate = NSRect(origin: NSPoint(x: x, y: y), size: size)
       if Self.isOnScreen(candidate) {
         panel.setFrame(candidate, display: false)
+        NSLog("[companion] position: restored saved \(NSStringFromRect(candidate))")
         return
       }
+      NSLog("[companion] position: saved \(NSStringFromRect(candidate)) is OFF-SCREEN — using default")
     }
-    panel.setFrame(Self.defaultFrame(size: size), display: false)
+    let def = Self.defaultFrame(size: size)
+    panel.setFrame(def, display: false)
+    // Self-heal: persist the corrected origin so a previously-poisoned saved position (e.g. from the
+    // old 0×0 collapse) doesn't get re-rejected every launch.
+    UserDefaults.standard.set(Double(def.origin.x), forKey: Self.posXKey)
+    UserDefaults.standard.set(Double(def.origin.y), forKey: Self.posYKey)
+    NSLog("[companion] position: default \(NSStringFromRect(def))")
   }
 
+  /// The overlay must be FULLY visible — require the frame to be contained in a screen's visible area,
+  /// not merely intersecting it. A mere intersection let a stale corner position (e.g. the 0×0-derived
+  /// {1488,24}) survive as a 24-px sliver at the screen edge.
   private static func isOnScreen(_ frame: NSRect) -> Bool {
-    for screen in NSScreen.screens where screen.visibleFrame.intersects(frame) {
+    for screen in NSScreen.screens where screen.visibleFrame.contains(frame) {
       return true
     }
     return false

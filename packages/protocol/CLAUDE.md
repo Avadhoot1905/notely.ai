@@ -9,7 +9,7 @@ Any change to the protocol updates **all three together**, in one change, with a
 2. Rust `engine/src/ipc/` (`protocol.rs`, `events.rs`, `server.rs`),
 3. Dart `apps/desktop/lib/ipc/` (`protocol.dart`, `engine_client.dart`).
 
-`PROTOCOL_VERSION` / `protocolVersion` is currently **4** and must be bumped in lockstep. The client
+`PROTOCOL_VERSION` / `protocolVersion` is currently **5** and must be bumped in lockstep. The client
 **refuses an engine with a mismatched major version** — so a partial change breaks the app loudly.
 
 ## Contract facts
@@ -28,9 +28,8 @@ the schema + Dart client are kept in sync with it. When they disagree, the Rust 
 ## Conventions
 - Keep the protocol **small, boring, explicit**. Add message types only when a real feature needs them —
   not speculatively. The Dart side is a faithful, tested mirror of the Rust types.
-- **Known drift (code is authoritative at `4`):** both this `README.md` ("v3") and `docs/ipc.md`
-  ("currently 3") predate v4 (which added `GetKnowledgeMap` + the Slack/Teams source family). Fix these
-  docs if you touch the protocol; don't propagate the stale value.
+- **Version docs are current at `5`** (`README.md`, `docs/ipc.md`, and the Rust/Dart constants all say
+  5). If you bump the protocol, update all of them in lockstep — don't let the docs drift behind code.
 
 ## Generated / paired files
 `schema/ipc.schema.json` is the machine-readable contract — keep it in sync with the Rust/Dart types

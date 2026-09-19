@@ -15,7 +15,7 @@
 /// v3: added `ListMeetings`/`ReprocessMeeting` and the `MeetingList` response (Inbox + retry).
 /// v4: added the Knowledge Space (`GetKnowledgeMap`) and external sources — Slack/Teams —
 ///     (`ListSourceChannels`/`ImportSource`/`ListSources`/`DisconnectSource`).
-const int protocolVersion = 4;
+const int protocolVersion = 5;
 
 // ---------------------------------------------------------------------------
 // Domain models (mirror engine/src/domain and pipeline/jobs.rs).
@@ -640,6 +640,18 @@ class GetTranscript extends Request {
   String get type => 'GetTranscript';
   @override
   Map<String, dynamic>? get params => {'meeting_id': meetingId};
+}
+
+/// Synchronously transcribe one small audio file (a live speech segment); returns a [Transcript].
+/// Ephemeral: the engine creates no job and persists nothing (the authoritative transcript still
+/// comes from the full-audio `ProcessMeeting` pass at stop()).
+class TranscribeChunk extends Request {
+  final String path;
+  const TranscribeChunk(this.path);
+  @override
+  String get type => 'TranscribeChunk';
+  @override
+  Map<String, dynamic>? get params => {'path': path};
 }
 
 /// Fetch the rendered (Markdown) MOM for a meeting.

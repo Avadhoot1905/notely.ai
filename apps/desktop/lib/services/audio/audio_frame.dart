@@ -62,9 +62,21 @@ class AudioFrame {
     return Duration(microseconds: (frameCount * 1000000) ~/ sampleRate);
   }
 
-  /// A view over the 16-bit samples (interleaved across channels). No copy.
-  Int16List get samples =>
-      data.buffer.asInt16List(data.offsetInBytes, data.lengthInBytes ~/ 2);
+  /// The 16-bit samples (interleaved across channels).
+  ///
+  /// A real recorder chunk is often a [Uint8List] *view* whose `offsetInBytes` is odd, which
+  /// `asInt16List` rejects (it requires 2-byte alignment). Aligned views are returned as a zero-copy
+  /// view; a misaligned view is copied once into a fresh, aligned buffer. Either way a trailing odd
+  /// byte (if any) is ignored.
+  Int16List get samples {
+    final byteCount = data.lengthInBytes & ~1; // whole 16-bit samples only
+    if (byteCount == 0) return Int16List(0);
+    if (data.offsetInBytes.isEven) {
+      return data.buffer.asInt16List(data.offsetInBytes, byteCount ~/ 2);
+    }
+    final aligned = data.sublist(0, byteCount); // fresh buffer, offset 0
+    return aligned.buffer.asInt16List(0, byteCount ~/ 2);
+  }
 
   /// A copy of this frame stamped with its meeting-timeline [offset]. Shares [data] (no PCM copy).
   AudioFrame withOffset(Duration offset) => AudioFrame(

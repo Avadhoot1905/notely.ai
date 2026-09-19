@@ -186,6 +186,7 @@ impl Engine {
             }
             Request::GetMeeting { meeting_id } => self.get_meeting(&meeting_id).await,
             Request::GetTranscript { meeting_id } => self.get_transcript(&meeting_id).await,
+            Request::TranscribeChunk { path } => self.transcribe_chunk(&path).await,
             Request::GetMom { meeting_id } => self.get_mom(&meeting_id).await,
             Request::Search {
                 query,
@@ -571,6 +572,21 @@ impl Engine {
             Ok(None) => Response::Error {
                 message: format!("no transcript for meeting: {id}"),
             },
+            Err(e) => Response::Error {
+                message: e.to_string(),
+            },
+        }
+    }
+
+    /// Synchronously transcribe one small audio segment (live capture). Reuses media + ASR via the
+    /// orchestrator; no job, no events, no persistence. Errors degrade to `Response::Error`.
+    async fn transcribe_chunk(&self, path: &str) -> Response {
+        match self
+            .orchestrator
+            .transcribe_one(std::path::Path::new(path))
+            .await
+        {
+            Ok(transcript) => Response::Transcript(transcript),
             Err(e) => Response::Error {
                 message: e.to_string(),
             },

@@ -22,6 +22,7 @@ import '../features/stash/stash_state.dart';
 import '../features/workspace/workspace_shell.dart';
 import '../ipc/engine_client.dart';
 import '../services/ask/engine_ask_service.dart';
+import '../services/asr/engine_asr_engine.dart';
 import '../services/companion/companion_window_service.dart';
 import '../services/filesystem/file_watcher_service.dart';
 import '../services/meeting/engine_summary_service.dart';
@@ -62,6 +63,9 @@ class _NotelyAppState extends State<NotelyApp> {
   // falling back to a deterministic offline summary only when the engine is unreachable.
   late final ListeningController _listening = ListeningController(
     summary: EngineSummaryService(client: _engine),
+    // Real speech-to-text: the captured mic recording is transcribed by the engine's Qwen3-ASR over
+    // IPC at stop() (batch). Behind the AsrEngine seam so this controller stays backend-neutral.
+    asr: EngineAsrEngine(client: _engine),
   );
   late final ThemeController _theme = ThemeController();
   // Ask is source-grounded through the engine (retrieval + local LLM), degrading to the offline

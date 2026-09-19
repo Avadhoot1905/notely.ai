@@ -16,6 +16,12 @@ import 'package:flutter/services.dart';
 @pragma('vm:entry-point')
 void companionMain() {
   WidgetsFlutterBinding.ensureInitialized();
+  // TEMPORARY diagnostic: proves the `--notely-companion` entrypoint dispatch reached the companion
+  // engine (vs. silently booting the full app). If this line is absent from the run log, the second
+  // engine never entered companionMain() and the transparent panel renders nothing.
+  debugPrint(
+    '[companion-engine] companionMain() booted — rendering overlay UI',
+  );
   runApp(const _CompanionApp());
 }
 
@@ -292,103 +298,112 @@ class _Popover extends StatelessWidget {
             ),
           ],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-              child: Row(
-                children: [
-                  _Dot(color: style.color, pulse: style.pulse && !reduceMotion),
-                  const SizedBox(width: 9),
-                  Flexible(
-                    child: Text(
-                      snap.meetingTitle ?? style.label,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: _textPrimary,
-                      ),
+        // Scroll-wrap the popover body: on expand, the native window resizes to the popover height a
+        // frame or two AFTER Dart flips to the expanded layout, so the tall content is briefly laid
+        // out in the pill-height surface (a RenderFlex overflow). A SingleChildScrollView absorbs that
+        // transient frame; at the full popover height everything fits and nothing scrolls.
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+                child: Row(
+                  children: [
+                    _Dot(
+                      color: style.color,
+                      pulse: style.pulse && !reduceMotion,
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    _fmt(snap.elapsedSeconds),
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontFeatures: [FontFeature.tabularFigures()],
-                      color: _textSecondary,
-                    ),
-                  ),
-                  const Spacer(),
-                  _IconBtn(
-                    icon: Icons.close_rounded,
-                    semanticLabel: 'Collapse companion',
-                    onTap: onCollapse,
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1, color: _border),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 240),
-              child: items.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 28),
-                      child: Center(
-                        child: Text(
-                          emptyText,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: _textFaint,
-                          ),
+                    const SizedBox(width: 9),
+                    Flexible(
+                      child: Text(
+                        snap.meetingTitle ?? style.label,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: _textPrimary,
                         ),
                       ),
-                    )
-                  : ListView(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                      children: items,
                     ),
-            ),
-            const Divider(height: 1, color: _border),
-            Padding(
-              padding: const EdgeInsets.all(10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _ActionBtn(
-                      label: snap.paused ? 'Resume' : 'Pause',
-                      icon: snap.paused
-                          ? Icons.play_arrow_rounded
-                          : Icons.pause_rounded,
-                      onTap: onPause,
+                    const SizedBox(width: 10),
+                    Text(
+                      _fmt(snap.elapsedSeconds),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                        color: _textSecondary,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _ActionBtn(
-                      label: 'Stop',
-                      icon: Icons.stop_rounded,
-                      danger: true,
-                      onTap: onStop,
+                    const Spacer(),
+                    _IconBtn(
+                      icon: Icons.close_rounded,
+                      semanticLabel: 'Collapse companion',
+                      onTap: onCollapse,
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-              child: _ActionBtn(
-                label: 'Open in Notely',
-                icon: Icons.open_in_new_rounded,
-                filled: true,
-                onTap: onOpen,
+              const Divider(height: 1, color: _border),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: items.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 28),
+                        child: Center(
+                          child: Text(
+                            emptyText,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: _textFaint,
+                            ),
+                          ),
+                        ),
+                      )
+                    : ListView(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                        children: items,
+                      ),
               ),
-            ),
-          ],
+              const Divider(height: 1, color: _border),
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _ActionBtn(
+                        label: snap.paused ? 'Resume' : 'Pause',
+                        icon: snap.paused
+                            ? Icons.play_arrow_rounded
+                            : Icons.pause_rounded,
+                        onTap: onPause,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _ActionBtn(
+                        label: 'Stop',
+                        icon: Icons.stop_rounded,
+                        danger: true,
+                        onTap: onStop,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                child: _ActionBtn(
+                  label: 'Open in Notely',
+                  icon: Icons.open_in_new_rounded,
+                  filled: true,
+                  onTap: onOpen,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

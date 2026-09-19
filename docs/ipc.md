@@ -104,10 +104,11 @@ stages.
 
 - **`request_id`** correlates a response with its request.
 - **`job_id`** tracks a long-running pipeline run for progress and cancellation.
-- **`PROTOCOL_VERSION`** (currently `3`) is sent in every envelope. The client refuses an engine
+- **`PROTOCOL_VERSION`** (currently `5`) is sent in every envelope. The client refuses an engine
   with a mismatched major version. (v2 added `Search`/`Ask` + `SearchResults`/`Answer`; v3 added
   `ListMeetings`/`ReprocessMeeting` + `MeetingList` for the Inbox and reliable retry; v4 added
-  `GetKnowledgeMap` for the Knowledge Space and the Slack/Teams source family.)
+  `GetKnowledgeMap` for the Knowledge Space and the Slack/Teams source family; v5 added
+  `TranscribeChunk` for live per-segment ASR, reusing the `Transcript` response.)
 
 ## Versioning philosophy
 

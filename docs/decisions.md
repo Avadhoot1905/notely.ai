@@ -3,6 +3,17 @@
 A lightweight log of the major v0 architectural decisions. Newest first. Keep entries short:
 what we decided, and why.
 
+## D-0022 — Live transcription = ephemeral per-segment preview + authoritative full-audio pass
+The desktop app captures the microphone and, at each closed VAD speech segment, sends a small WAV to
+the engine's new synchronous `TranscribeChunk { path } → Transcript` request (protocol **v5**;
+reuses media(FFmpeg)+ASR via `Orchestrator::transcribe_one`, no job/events/persistence). Those live
+segments are an **ephemeral companion preview**; at stop() the full-session recording still runs the
+normal `ProcessMeeting { Audio }` pipeline, whose result **replaces** the previews
+(`TranscriptReplaced`) and is the authoritative, persisted transcript — preserving "source saved
+before AI" and `notely.db` as the source of truth. All ASR stays behind the Dart `AsrEngine` seam
+(`transcribe` batch + `transcribeChunk` live); `ListeningController`/UI never see Qwen/IPC. Requires
+`ffmpeg` + a Qwen3-ASR runtime at `NOTELY_ASR_URL`. See [ipc.md](ipc.md).
+
 ## D-0021 — MLX is an opt-in provider behind an HTTP boundary, not linked in; no CUDA in Notely
 Apple-Silicon acceleration is offered via `MlxProvider` (`llm/mlx.rs`) talking to an external
 `mlx_lm.server` (OpenAI-compatible), selected by `NOTELY_LLM_PROVIDER=mlx` — the same

@@ -115,6 +115,36 @@ void main() {
     expect(notifications.cancelled, contains('zoom:abc'));
   });
 
+  test(
+    'manual listening (no meeting detected) shows the companion, hides on stop',
+    () async {
+      manager = makeManager();
+      await manager.start(); // full capabilities by default; nothing detected
+
+      // The Listen button starts the session directly on the ListeningController.
+      await listening.start();
+      await _pump();
+      expect(
+        manager.state,
+        MeetingRuntimeState.notRunning,
+        reason: 'never entered detection tracking',
+      );
+      expect(
+        companion.visible,
+        isTrue,
+        reason: 'companion appears whenever listening starts',
+      );
+
+      await listening.stop();
+      await _pump();
+      expect(
+        companion.visible,
+        isFalse,
+        reason: 'and hides when listening stops',
+      );
+    },
+  );
+
   test('dismiss → notRunning and never re-nags the same meeting', () async {
     manager = makeManager();
     await manager.start();

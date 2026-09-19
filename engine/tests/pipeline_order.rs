@@ -211,6 +211,26 @@ async fn audio_input_runs_media_asr_chunk_extract_synthesize_then_store() {
 }
 
 #[tokio::test]
+async fn transcribe_one_runs_only_media_and_asr_no_job_or_persistence() {
+    let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+    let (orch, _jobs) = orchestrator(&calls);
+
+    let transcript = orch
+        .transcribe_one(std::path::Path::new("/tmp/chunk.m4a"))
+        .await
+        .expect("chunk transcribes");
+
+    // Returns the ASR output...
+    assert!(
+        !transcript.segments.is_empty(),
+        "returns the ASR transcript"
+    );
+    // ...and touches ONLY media + ASR — no chunking/AI/store (no job, no events, no persistence).
+    let log = calls.lock().unwrap().clone();
+    assert_eq!(log, vec!["media.extract_audio", "asr.transcribe"]);
+}
+
+#[tokio::test]
 async fn transcript_input_skips_media_and_asr_but_still_extracts_and_synthesizes() {
     let calls: Calls = Arc::new(Mutex::new(Vec::new()));
     let (orch, jobs) = orchestrator(&calls);

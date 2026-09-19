@@ -58,4 +58,27 @@ void main() {
       expect(identical(stamped.data, f.data), isTrue);
     },
   );
+
+  test('samples handle a misaligned (odd byteOffset) view without throwing', () {
+    // Real recorder chunks are views into a larger buffer with an arbitrary (often odd) offset,
+    // which asInt16List rejects. Reproduce that: a view starting at byte 5.
+    final backing = Uint8List(21);
+    final view = Uint8List.sublistView(
+      backing,
+      5,
+    ); // offsetInBytes == 5 (odd), 16 bytes
+    expect(view.offsetInBytes.isOdd, isTrue);
+    final f = AudioFrame(
+      source: AudioSource.system,
+      capturedAt: DateTime(2020),
+      sampleRate: 16000,
+      channels: 1,
+      data: view,
+    );
+    expect(
+      () => f.samples,
+      returnsNormally,
+    ); // was a RangeError in live capture
+    expect(f.samples.length, 8); // 16 bytes / 2
+  });
 }

@@ -18,7 +18,8 @@ use crate::sources::model::{Channel, ConnectedSource, ImportScope, ImportSummary
 /// v3: added `ListMeetings`/`ReprocessMeeting` and the `MeetingList` response (Inbox + retry).
 /// v4: added the Knowledge Space (`GetKnowledgeMap`) and external sources — Slack/Teams —
 ///     (`ListSourceChannels`/`ImportSource`/`ListSources`/`DisconnectSource`).
-pub const PROTOCOL_VERSION: u32 = 4;
+/// v5: added synchronous `TranscribeChunk` (live per-segment ASR; no job/events/persistence).
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Correlates a response with the request that produced it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +72,11 @@ pub enum Request {
     GetMeeting { meeting_id: MeetingId },
     /// Fetch the canonical transcript for a meeting.
     GetTranscript { meeting_id: MeetingId },
+    /// Synchronously transcribe ONE small audio file (a live speech segment) and return its
+    /// transcript immediately. Reuses media (FFmpeg) + ASR; creates no job, emits no events, and
+    /// persists nothing — the live companion transcript is ephemeral (the authoritative transcript
+    /// still comes from the full-audio `ProcessMeeting` pass).
+    TranscribeChunk { path: String },
     /// Fetch the rendered (Markdown) MOM for a meeting.
     GetMom { meeting_id: MeetingId },
     /// Full-text search the user's vault of Markdown notes at `vault_path`.

@@ -20,15 +20,16 @@ implementations stay in sync:
 - `schema/` — language-neutral schema definitions for the IPC messages (requests, responses,
   events) plus the protocol version. Treat these as the source of truth.
 
-## The contract (v3)
+## The contract (v5)
 
 This matches the implemented Rust engine (`engine/src/ipc/`, the source of truth). The Dart client
 (`apps/desktop/lib/ipc`) is synced to this contract: a real `EngineClient` speaks the transport
 below, and `protocol.dart` mirrors these types.
 
-- **Protocol version:** `3`. Bump on any breaking change; clients refuse mismatched majors.
+- **Protocol version:** `5`. Bump on any breaking change; clients refuse mismatched majors.
   (v2 added vault-wide `Search`/`Ask`; v3 added `ListMeetings`/`ReprocessMeeting` and the
-  `MeetingList` response for the Inbox + reliable retry.)
+  `MeetingList` response for the Inbox + reliable retry; v4 added `GetKnowledgeMap` and the
+  Slack/Teams source family; v5 added `TranscribeChunk` for live per-segment ASR.)
 - **Transport (v0):** newline-delimited JSON over a loopback TCP socket (default
   `127.0.0.1:8765`), isolated in `server.rs` so it can change later. The engine runs as a
   separate process; the app connects and reconnects with capped backoff.

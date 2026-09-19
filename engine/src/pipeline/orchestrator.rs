@@ -380,6 +380,28 @@ impl Orchestrator {
         Ok(transcript)
     }
 
+    /// Transcribe a single audio file synchronously: media normalize (FFmpeg → 16 kHz mono) → ASR →
+    /// [Transcript]. No job, no events, no storage — this backs the live per-segment `TranscribeChunk`
+    /// request. The normalized WAV is written under `data_dir/tmp/<nanos>` and cleaned up after ASR
+    /// reads it. Errors degrade honestly (Media/Asr → `PipelineError`).
+    pub async fn transcribe_one(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<Transcript, PipelineError> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let out_dir = self.data_dir.join("tmp").join(format!("chunk-{nanos}"));
+        let prepared = self
+            .media
+            .extract_audio(path, &out_dir, &ExtractOptions::default())
+            .await?;
+        let transcript = self.asr.transcribe(&AudioInput::new(prepared.path)).await?;
+        let _ = tokio::fs::remove_dir_all(&out_dir).await; // best-effort cleanup
+        Ok(transcript)
+    }
+
     /// The two-pass AI analysis with per-chunk extraction progress and validation events.
     async fn analyze(
         &self,

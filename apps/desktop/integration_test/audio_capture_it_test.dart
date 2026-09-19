@@ -10,6 +10,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:notely_desktop/services/audio/audio_frame.dart';
 import 'package:notely_desktop/services/audio/audio_ingestion.dart';
 import 'package:notely_desktop/services/audio/meeting_audio_service.dart';
+import 'package:notely_desktop/services/audio/speech_segmenter.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -23,12 +24,21 @@ void main() {
     final ingestion = AudioIngestion(startedAt: DateTime.now());
     var ingestedMic = 0;
     var ingestedSystem = 0;
+    // Run frames through VAD + segmentation exactly as ListeningController does — this is the path
+    // that reads AudioFrame.samples and previously crashed on real (odd-byteOffset) recorder chunks.
+    final segmenters = {
+      AudioSource.microphone: SpeechSegmenter(source: AudioSource.microphone),
+      AudioSource.system: SpeechSegmenter(source: AudioSource.system),
+    };
     final ingestSub = ingestion.frames.listen((f) {
       if (f.source == AudioSource.microphone) {
         ingestedMic++;
       } else {
         ingestedSystem++;
       }
+      segmenters[f.source]?.add(
+        f,
+      ); // exercises EnergyVad → AudioFrame.samples on live PCM
     });
     final framesSub = svc.frames.listen(ingestion.add);
 

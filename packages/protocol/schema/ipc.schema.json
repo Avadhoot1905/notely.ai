@@ -3,7 +3,7 @@
   "$id": "https://notely.ai/schema/ipc.schema.json",
   "title": "Notely IPC protocol",
   "description": "Canonical, language-neutral schema for the Flutter <-> Rust IPC contract. Mirrored by engine/src/ipc (the source of truth) and apps/desktop/lib/ipc. See packages/protocol/README.md. Transport: newline-delimited JSON over a loopback TCP socket (default 127.0.0.1:8765). Requests are wrapped in a RequestEnvelope { protocol_version, request_id, ...Request }; responses in a ResponseEnvelope { protocol_version, request_id, ...Response }; events in an EventEnvelope { protocol_version, event: Event }.",
-  "protocolVersion": 4,
+  "protocolVersion": 5,
   "definitions": {
     "ProcessInput": {
       "description": "What to process into a meeting. Tagged by `kind`.",
@@ -21,6 +21,7 @@
         { "properties": { "type": { "const": "CancelJob" }, "params": { "properties": { "job_id": { "type": "string" } }, "required": ["job_id"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "GetMeeting" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "GetTranscript" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
+        { "properties": { "type": { "const": "TranscribeChunk" }, "params": { "properties": { "path": { "type": "string" } }, "required": ["path"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "GetMom" }, "params": { "properties": { "meeting_id": { "type": "string" } }, "required": ["meeting_id"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "Search" }, "params": { "properties": { "query": { "type": "string" }, "vault_path": { "type": "string" }, "limit": { "type": ["integer", "null"] } }, "required": ["query", "vault_path"] } }, "required": ["type", "params"] },
         { "properties": { "type": { "const": "Ask" }, "params": { "properties": { "question": { "type": "string" }, "vault_path": { "type": "string" } }, "required": ["question", "vault_path"] } }, "required": ["type", "params"] },

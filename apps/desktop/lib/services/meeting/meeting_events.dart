@@ -42,6 +42,13 @@ class TranscriptFinalized extends MeetingEvent {
   final TranscriptSegment segment;
 }
 
+/// Replace the whole finalized transcript with an authoritative set. Emitted when the full-audio ASR
+/// pass at stop() supersedes the ephemeral live per-segment previews (so they aren't duplicated).
+class TranscriptReplaced extends MeetingEvent {
+  const TranscriptReplaced(super.at, this.segments);
+  final List<TranscriptSegment> segments;
+}
+
 /// Capture health changed (a source started/stopped/failed). Lets the UI reflect capture state
 /// without reaching into the audio service.
 class AudioHealthChanged extends MeetingEvent {

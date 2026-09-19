@@ -117,21 +117,24 @@ class MeetingSessionManager extends ChangeNotifier {
   /// instead of opening dead channels — honest degradation, not a silent no-op storm.
   Future<void> start({PlatformCapabilities? capabilities}) async {
     if (capabilities != null) _capabilities = capabilities;
-    if (!_capabilities.meetingDetection) return;
 
-    // Clear any overlay left behind by a crash/previous run before we begin.
-    if (_capabilities.companionOverlay) await _companion.hide();
+    // The companion mirrors the listening session — whether it was started by the Listen button or
+    // by meeting detection — so wire the overlay + observe the session even when DETECTION isn't
+    // available on this platform.
+    if (_capabilities.companionOverlay) {
+      await _companion.hide(); // clear any overlay left by a crash/previous run
+      _cmdSub = _companion.commands.listen(_onCompanionCommand);
+    }
+    _listening.addListener(_onListeningChanged);
+
+    if (!_capabilities.meetingDetection) return;
 
     if (_capabilities.nativeNotifications) {
       await _notifications.requestPermission();
       _actionSub = _notifications.actions.listen(_onNotificationAction);
     }
-    if (_capabilities.companionOverlay) {
-      _cmdSub = _companion.commands.listen(_onCompanionCommand);
-    }
     _detSub = _detector.detections.listen(_onDetected);
     _endSub = _detector.endings.listen(_onEnded);
-    _listening.addListener(_onListeningChanged);
 
     await _detector.start(enabledProviders: _settings.enabledProviders);
   }
@@ -262,11 +265,25 @@ class MeetingSessionManager extends ChangeNotifier {
 
   // ── Session → companion sync ─────────────────────────────────────────────
   void _onListeningChanged() {
-    // If tracking but the session ended via the main UI (idle/reviewing), reconcile. Snapshot
-    // pushes are handled reactively by the CompanionController (it listens to the same session).
-    if (_state == MeetingRuntimeState.tracking &&
-        !(_listening.isListening || _listening.isPaused)) {
-      _finalize();
+    final active = _listening.isListening || _listening.isPaused;
+    if (_state == MeetingRuntimeState.tracking) {
+      // Detected-meeting flow: reconcile if the session ended via the main UI. Snapshots are pushed
+      // reactively by the CompanionController; visibility was already set by _startTracking.
+      if (!active) _finalize();
+      return;
+    }
+    // Manual (non-detected) listening: the companion appears whenever listening starts and hides
+    // when it stops.
+    unawaited(_syncManualCompanion(active));
+  }
+
+  /// Mirror companion visibility to a manually-started listening session (Listen button).
+  Future<void> _syncManualCompanion(bool active) async {
+    if (!_capabilities.companionOverlay || !_settings.showCompanion) return;
+    if (active && !_companionController.state.isVisible) {
+      await _companionController.show();
+    } else if (!active && _companionController.state.isVisible) {
+      await _companionController.hide();
     }
   }
 

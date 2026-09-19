@@ -7,7 +7,7 @@ import 'package:notely_desktop/ipc/protocol.dart';
 void main() {
   test('protocol version matches the engine contract', () {
     // Must be bumped in lockstep with PROTOCOL_VERSION in engine/src/ipc/protocol.rs.
-    expect(protocolVersion, 4);
+    expect(protocolVersion, 5);
   });
 
   group('requests serialize to the tagged wire shape', () {
@@ -19,6 +19,13 @@ void main() {
       expect(const GetMom('m1').toJson(), {
         'type': 'GetMom',
         'params': {'meeting_id': 'm1'},
+      });
+    });
+
+    test('TranscribeChunk carries path', () {
+      expect(const TranscribeChunk('/tmp/seg.wav').toJson(), {
+        'type': 'TranscribeChunk',
+        'params': {'path': '/tmp/seg.wav'},
       });
     });
 

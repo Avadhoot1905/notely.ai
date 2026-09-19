@@ -112,3 +112,30 @@ class MockTranscriptService implements TranscriptService {
     await _controller.close();
   }
 }
+
+/// Emits lifecycle events but NO transcript segments — the honest default for the running app until
+/// real ASR is wired. The live transcript stays empty (the UI shows its "waiting for speech" state)
+/// instead of replaying canned/dummy lines. [MockTranscriptService] remains for tests/fixtures.
+class SilentTranscriptService implements TranscriptService {
+  final StreamController<TranscriptEvent> _controller =
+      StreamController<TranscriptEvent>.broadcast();
+
+  @override
+  Stream<TranscriptEvent> get events => _controller.stream;
+
+  void _emit(TranscriptEvent e) {
+    if (!_controller.isClosed) _controller.add(e);
+  }
+
+  @override
+  void start() => _emit(const TranscriptStarted());
+  @override
+  void pause() => _emit(const TranscriptPausedEvent());
+  @override
+  void resume() => _emit(const TranscriptResumedEvent());
+  @override
+  void stop() => _emit(const TranscriptStoppedEvent());
+
+  @override
+  Future<void> dispose() async => _controller.close();
+}

@@ -393,6 +393,17 @@ class EngineClient {
     throw _unexpected(resp, 'Transcript');
   }
 
+  /// Synchronously transcribe one small audio file (a live speech segment). Returns its transcript;
+  /// the engine persists nothing. Uses a shorter timeout suited to live per-segment latency.
+  Future<Transcript> transcribeChunk(
+    String path, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final resp = await send(TranscribeChunk(path), timeout: timeout);
+    if (resp is TranscriptResponse) return resp.transcript;
+    throw _unexpected(resp, 'Transcript');
+  }
+
   /// Fetch the rendered (Markdown) MOM for a meeting.
   Future<String> getMom(String meetingId) async {
     final resp = await send(GetMom(meetingId));
