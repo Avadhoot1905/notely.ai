@@ -30,6 +30,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 
+import 'audio_frame.dart';
+
 /// Availability of an individual audio source. Ordered from strongest to weakest positive claim.
 enum AudioSourceStatus {
   /// Endpoint opened AND real PCM frames have arrived. The strongest claim.
@@ -90,6 +92,10 @@ abstract class MeetingAudioService {
 
   /// Latest known capabilities (from the last [requestPermissions]).
   AudioCapabilities get capabilities;
+
+  /// Source-tagged PCM frames from all active capture sources (microphone + system). Broadcast, so
+  /// the ingestion layer (and nothing UI-facing) can consume raw audio. Empty when nothing captures.
+  Stream<AudioFrame> get frames;
 
   Future<void> startMicrophone();
   Future<void> startSystemAudio();
@@ -199,6 +205,18 @@ class RecordMeetingAudioService implements MeetingAudioService {
     : _onChanged = onCapabilitiesChanged;
 
   final VoidCallback? _onChanged;
+
+  // Capture PCM config (matches the RecordConfig defaults used below): 16-bit LE, 44.1 kHz, stereo.
+  static const int _sampleRate = 44100;
+  static const int _channels = 2;
+
+  /// Source-tagged frames emitted to the ingestion layer. Broadcast; independent of the byte
+  /// counters (which stay for the verified capture-health signal).
+  final StreamController<AudioFrame> _frames =
+      StreamController<AudioFrame>.broadcast();
+
+  @override
+  Stream<AudioFrame> get frames => _frames.stream;
 
   final AudioRecorder _micRecorder = AudioRecorder();
   StreamSubscription<Uint8List>? _micSub;
@@ -351,6 +369,20 @@ class RecordMeetingAudioService implements MeetingAudioService {
       debugPrint('[Mic] first PCM frames received (${chunk.length} bytes)');
       _setMicrophone(AudioSourceStatus.capturing);
     }
+    _emitFrame(AudioSource.microphone, chunk);
+  }
+
+  void _emitFrame(AudioSource source, Uint8List chunk) {
+    if (chunk.isEmpty || _frames.isClosed) return;
+    _frames.add(
+      AudioFrame(
+        source: source,
+        capturedAt: DateTime.now(),
+        sampleRate: _sampleRate,
+        channels: _channels,
+        data: chunk,
+      ),
+    );
   }
 
   @override
@@ -421,6 +453,7 @@ class RecordMeetingAudioService implements MeetingAudioService {
       _sysHeardSound = true;
       debugPrint('[SystemAudio] non-silent audio detected');
     }
+    _emitFrame(AudioSource.system, chunk);
   }
 
   @override
@@ -476,6 +509,7 @@ class RecordMeetingAudioService implements MeetingAudioService {
   @override
   Future<void> dispose() async {
     await stop();
+    await _frames.close();
     await _micRecorder.dispose();
     await _sysRecorder.dispose();
   }

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:notely_desktop/features/editor/editor_state.dart';
 import 'package:notely_desktop/features/listening/listening_state.dart';
+import 'package:notely_desktop/services/audio/audio_frame.dart';
 import 'package:notely_desktop/services/audio/meeting_audio_service.dart';
 import 'package:notely_desktop/services/meeting/summary_service.dart';
 import 'package:notely_desktop/services/transcript/transcript_service.dart';
@@ -20,6 +21,8 @@ class FakeAudioService implements MeetingAudioService {
   );
   @override
   Future<AudioCapabilities> requestPermissions() async => capabilities;
+  @override
+  Stream<AudioFrame> get frames => const Stream<AudioFrame>.empty();
   @override
   Future<void> startMicrophone() async => calls.add('startMic');
   @override

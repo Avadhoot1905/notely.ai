@@ -1,23 +1,32 @@
-// Listening session state machine.
+// Listening session state machine + live-meeting composition root.
 //
-// Coordinates the audio capture, transcript stream, and summarisation services behind one
-// coherent state model so widgets never juggle scattered booleans, and so the future Rust IPC
-// swap is localized to the injected services.
+// Coordinates the audio-ingestion pipeline and the transcript source behind one coherent state
+// model. The data flow it wires up:
+//
+//   capture (mic + system) ─▶ AudioIngestion ─▶ VAD ─▶ SpeechSegmenter ─▶ [SpeechSegment]  (→ ASR seam)
+//   transcript source (mock today, ASR later) ─▶ MeetingEventBus ─▶ LiveMeetingState ─▶ UI
+//
+// The UI projects from LiveMeetingState (via [entries]); it never touches raw audio. Persistence
+// (summarise) stays downstream of the event/state layer and off the capture path.
 //
 //   Idle ──start──▶ Listening ──pause──▶ Paused ──resume──▶ Listening
 //                      │                                         │
 //                      └──────────────── stop ───────────────────┘
 //                                         ▼
 //                                     Reviewing ──summarise/close──▶ Idle
-//
-// Pausing keeps the session + transcript alive (only capture is suspended). Stop moves to a
-// Review state that retains the transcript until the user summarises or closes it.
 
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../services/audio/audio_frame.dart';
+import '../../services/audio/audio_ingestion.dart';
 import '../../services/audio/meeting_audio_service.dart';
+import '../../services/audio/speech_segmenter.dart';
+import '../../services/meeting/live_meeting_state.dart';
+import '../../services/meeting/meeting_event_bus.dart';
+import '../../services/meeting/meeting_events.dart';
+import '../../services/meeting/transcript_segment.dart';
 import '../../services/meeting/summary_service.dart';
 import '../../services/transcript/transcript_service.dart';
 import '../editor/editor_state.dart';
@@ -30,7 +39,6 @@ class MeetingSession {
 
   /// The editor file this session will summarise into (captured at start).
   final String? activeFilePath;
-  final List<TranscriptEntry> segments = [];
 }
 
 class ListeningController extends ChangeNotifier {
@@ -40,26 +48,37 @@ class ListeningController extends ChangeNotifier {
     SummaryService? summary,
   }) : _transcript = transcript ?? MockTranscriptService(),
        _summary = summary ?? const MockSummaryService() {
-    // Default service pushes capability changes (e.g. first PCM frame flips available → capturing)
-    // so the panel refreshes live. An injected service (tests) manages its own updates.
     _audio =
         audio ??
         RecordMeetingAudioService(
           onCapabilitiesChanged: _onAudioCapabilitiesChanged,
         );
+    // Live Meeting State consumes the event bus; the UI observes it through this controller.
+    _liveBusSub = _bus.events.listen(_live.apply);
+    _live.addListener(notifyListeners);
   }
 
   late final MeetingAudioService _audio;
-
-  /// Refresh the UI when audio capability changes, unless the controller is already disposed.
-  void _onAudioCapabilitiesChanged() {
-    if (_disposed) return;
-    notifyListeners();
-  }
-
-  bool _disposed = false;
   final TranscriptService _transcript;
   final SummaryService _summary;
+
+  // --- live-meeting event/state layer (persists across sessions; reset per meeting) ---
+  final MeetingEventBus _bus = MeetingEventBus();
+  final LiveMeetingStateController _live = LiveMeetingStateController();
+  StreamSubscription<MeetingEvent>? _liveBusSub;
+
+  /// The projected live-meeting state (source for UI/companion projections).
+  LiveMeetingState get liveState => _live.state;
+
+  // --- capture → ingestion → segmentation (per session) ---
+  AudioIngestion? _ingestion;
+  final Map<AudioSource, SpeechSegmenter> _segmenters = {};
+  StreamSubscription<AudioFrame>? _framesSub;
+  StreamSubscription<AudioFrame>? _ingestSub;
+  int _speechSegmentCount = 0;
+
+  /// Speech segments produced this session (ready for the ASR seam). Diagnostic.
+  int get speechSegmentCount => _speechSegmentCount;
 
   StreamSubscription<TranscriptEvent>? _sub;
 
@@ -68,6 +87,7 @@ class ListeningController extends ChangeNotifier {
   bool _summarising = false;
   String? _summariseError;
   String? _notice;
+  bool _disposed = false;
 
   // Elapsed-capture accounting: accumulated time from finished listening spans, plus the span
   // in progress since [_runningSince]. Pausing folds the current span in; resuming reopens one.
@@ -116,10 +136,33 @@ class ListeningController extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<TranscriptEntry> get entries =>
-      List.unmodifiable(_session?.segments ?? const []);
+  /// UI-facing transcript, projected from Live Meeting State (never rebuilt from raw audio).
+  List<TranscriptEntry> get entries => List.unmodifiable(
+    _live.state.transcript.map(
+      (s) => TranscriptEntry(
+        time: _fmtTime(s.start),
+        speaker: s.speaker ?? '',
+        text: s.text,
+      ),
+    ),
+  );
+
+  static String _fmtTime(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 
   AudioCapabilities get audioCapabilities => _audio.capabilities;
+
+  /// Refresh the UI + publish capture health when audio capability changes.
+  void _onAudioCapabilitiesChanged() {
+    if (_disposed) return;
+    if (!_bus.isClosed) {
+      _bus.emit(AudioHealthChanged(elapsed, _audio.capabilities));
+    }
+    notifyListeners();
+  }
 
   /// Begin a session tied to the currently open editor file.
   Future<void> start({String? activeFilePath}) async {
@@ -128,20 +171,52 @@ class ListeningController extends ChangeNotifier {
     _accumulated = Duration.zero;
     _runningSince = DateTime.now();
     _state = ListeningState.listening;
+    _speechSegmentCount = 0;
+    _bus.emit(MeetingStarted(Duration.zero)); // resets Live Meeting State
     notifyListeners();
 
+    // Wire capture → ingestion → VAD → segmentation (per source). Runs for real; segments are
+    // ready for the ASR seam. Does not touch the transcript path.
+    _ingestion = AudioIngestion(startedAt: DateTime.now());
+    _segmenters
+      ..clear()
+      ..[AudioSource.microphone] = SpeechSegmenter(
+        source: AudioSource.microphone,
+      )
+      ..[AudioSource.system] = SpeechSegmenter(source: AudioSource.system);
+    _framesSub = _audio.frames.listen((f) => _ingestion?.add(f));
+    _ingestSub = _ingestion!.frames.listen((f) {
+      final seg = _segmenters[f.source]?.add(f);
+      if (seg != null) {
+        _speechSegmentCount++; // → ASR seam (not transcribed yet)
+      }
+    });
+
+    // Transcript source → meeting events. Today the mock emits scripted segments; a real ASR
+    // consumer would emit the same TranscriptFinalized/Partial events from SpeechSegments.
     _sub = _transcript.events.listen(_onTranscriptEvent);
     await _audio.start();
     _transcript.start();
-    // Reflect any permission result the audio probe produced.
     notifyListeners();
   }
 
   void _onTranscriptEvent(TranscriptEvent event) {
     switch (event) {
       case TranscriptSegmentEvent(:final segment):
-        _session?.segments.add(segment);
-        notifyListeners();
+        final at = elapsed;
+        _bus.emit(
+          TranscriptFinalized(
+            at,
+            TranscriptSegment(
+              id: 'mock-${_live.state.transcript.length}',
+              start: at,
+              end: at,
+              source: AudioSource.system,
+              speaker: segment.speaker,
+              text: segment.text,
+            ),
+          ),
+        );
       case TranscriptStarted():
       case TranscriptPausedEvent():
       case TranscriptResumedEvent():
@@ -154,6 +229,7 @@ class ListeningController extends ChangeNotifier {
     if (_state != ListeningState.listening) return;
     _foldRunningSpan();
     _state = ListeningState.paused;
+    _bus.emit(MeetingPaused(elapsed));
     notifyListeners();
     await _audio.pause();
     _transcript.pause();
@@ -163,23 +239,39 @@ class ListeningController extends ChangeNotifier {
     if (_state != ListeningState.paused) return;
     _runningSince = DateTime.now();
     _state = ListeningState.listening;
+    _bus.emit(MeetingResumed(elapsed));
     notifyListeners();
     await _audio.resume();
     _transcript.resume();
   }
 
-  /// Stop capture and enter the Review state (transcript retained).
+  /// Stop capture and enter the Review state (transcript retained in Live Meeting State).
   Future<void> stop() async {
     if (_state == ListeningState.idle || _state == ListeningState.reviewing) {
       return;
     }
     _foldRunningSpan();
     _state = ListeningState.reviewing;
+    _bus.emit(MeetingStopped(elapsed));
     notifyListeners();
     _transcript.stop();
     await _audio.stop();
+    await _teardownCapturePipeline();
     await _sub?.cancel();
     _sub = null;
+  }
+
+  Future<void> _teardownCapturePipeline() async {
+    await _framesSub?.cancel();
+    _framesSub = null;
+    await _ingestSub?.cancel();
+    _ingestSub = null;
+    for (final s in _segmenters.values) {
+      s.flush();
+    }
+    _segmenters.clear();
+    await _ingestion?.dispose();
+    _ingestion = null;
   }
 
   /// Summarise the session into [editor]'s open file and persist it, then close the session.
@@ -194,7 +286,7 @@ class ListeningController extends ChangeNotifier {
     notifyListeners();
     try {
       final markdown = await _summary.summarise(
-        segments: _session!.segments,
+        segments: entries,
         currentMarkdown: editor.text.text,
         title: null,
       );
@@ -240,6 +332,9 @@ class ListeningController extends ChangeNotifier {
     _session = null;
     _accumulated = Duration.zero;
     _runningSince = null;
+    _live.reset();
+    // Fire-and-forget teardown of any lingering capture pipeline (normally torn down at stop()).
+    unawaited(_teardownCapturePipeline());
     notifyListeners();
   }
 
@@ -247,8 +342,15 @@ class ListeningController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _sub?.cancel();
+    _liveBusSub?.cancel();
+    _framesSub?.cancel();
+    _ingestSub?.cancel();
+    unawaited(_ingestion?.dispose());
     _transcript.dispose();
     _audio.dispose();
+    _live.removeListener(notifyListeners);
+    _live.dispose();
+    unawaited(_bus.dispose());
     super.dispose();
   }
 }

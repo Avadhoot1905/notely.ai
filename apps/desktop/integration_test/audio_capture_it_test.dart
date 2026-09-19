@@ -7,6 +7,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:notely_desktop/services/audio/audio_frame.dart';
+import 'package:notely_desktop/services/audio/audio_ingestion.dart';
 import 'package:notely_desktop/services/audio/meeting_audio_service.dart';
 
 void main() {
@@ -15,9 +17,20 @@ void main() {
   testWidgets('captures real PCM from microphone and system-audio loopback', (
     tester,
   ) async {
-    final svc = RecordMeetingAudioService(
-      onCapabilitiesChanged: () {},
-    );
+    final svc = RecordMeetingAudioService(onCapabilitiesChanged: () {});
+
+    // Wire capture → ingestion so we can prove PCM reaches the new boundary (not just the counters).
+    final ingestion = AudioIngestion(startedAt: DateTime.now());
+    var ingestedMic = 0;
+    var ingestedSystem = 0;
+    final ingestSub = ingestion.frames.listen((f) {
+      if (f.source == AudioSource.microphone) {
+        ingestedMic++;
+      } else {
+        ingestedSystem++;
+      }
+    });
+    final framesSub = svc.frames.listen(ingestion.add);
 
     final caps = await svc.requestPermissions();
     debugPrint('EVIDENCE mic.permission=${caps.microphone}');
@@ -54,12 +67,23 @@ void main() {
     for (var i = 0; i < 10; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    debugPrint('EVIDENCE session2 systemAudio.bytes=${svc.systemBytesCaptured}');
+    debugPrint(
+      'EVIDENCE session2 systemAudio.bytes=${svc.systemBytesCaptured}',
+    );
     await svc.stop();
+
+    debugPrint('EVIDENCE ingestion.micFrames=$ingestedMic');
+    debugPrint('EVIDENCE ingestion.systemFrames=$ingestedSystem');
+    debugPrint('EVIDENCE ingestion.dropped=${ingestion.dropped}');
+
+    await framesSub.cancel();
+    await ingestSub.cancel();
+    await ingestion.dispose();
     await svc.dispose();
 
-    // The only hard assertion: a loopback endpoint was detected on this machine. Frame-arrival is
-    // reported as evidence rather than asserted, since it depends on OS routing/permission state.
+    // The only hard assertion: a loopback endpoint was detected on this machine. Frame-arrival at
+    // the ingestion boundary is reported as evidence rather than asserted, since it depends on OS
+    // routing/permission state.
     expect(
       caps.systemAudio,
       isNot(AudioSourceStatus.unsupported),
