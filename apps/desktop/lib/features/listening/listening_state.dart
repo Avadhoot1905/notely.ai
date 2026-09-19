@@ -38,11 +38,26 @@ class ListeningController extends ChangeNotifier {
     MeetingAudioService? audio,
     TranscriptService? transcript,
     SummaryService? summary,
-  }) : _audio = audio ?? RecordMeetingAudioService(),
-       _transcript = transcript ?? MockTranscriptService(),
-       _summary = summary ?? const MockSummaryService();
+  }) : _transcript = transcript ?? MockTranscriptService(),
+       _summary = summary ?? const MockSummaryService() {
+    // Default service pushes capability changes (e.g. first PCM frame flips available → capturing)
+    // so the panel refreshes live. An injected service (tests) manages its own updates.
+    _audio =
+        audio ??
+        RecordMeetingAudioService(
+          onCapabilitiesChanged: _onAudioCapabilitiesChanged,
+        );
+  }
 
-  final MeetingAudioService _audio;
+  late final MeetingAudioService _audio;
+
+  /// Refresh the UI when audio capability changes, unless the controller is already disposed.
+  void _onAudioCapabilitiesChanged() {
+    if (_disposed) return;
+    notifyListeners();
+  }
+
+  bool _disposed = false;
   final TranscriptService _transcript;
   final SummaryService _summary;
 
@@ -230,6 +245,7 @@ class ListeningController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _sub?.cancel();
     _transcript.dispose();
     _audio.dispose();

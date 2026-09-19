@@ -152,7 +152,7 @@ class _CapabilityStrip extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _row(t, 'Microphone', caps.microphone),
+          _row(t, 'Microphone', caps.microphone, note: caps.microphoneNote),
           const SizedBox(height: 4),
           _row(t, 'System audio', caps.systemAudio, note: caps.systemAudioNote),
         ],
@@ -167,6 +167,11 @@ class _CapabilityStrip extends StatelessWidget {
     String? note,
   }) {
     final (IconData icon, Color color, String text) = switch (status) {
+      AudioSourceStatus.capturing => (
+        Icons.check_circle,
+        t.success,
+        'Capturing',
+      ),
       AudioSourceStatus.available => (
         Icons.check_circle_outline,
         t.success,
@@ -186,6 +191,11 @@ class _CapabilityStrip extends StatelessWidget {
         Icons.remove_circle_outline,
         t.textFaint,
         'Unavailable',
+      ),
+      AudioSourceStatus.error => (
+        Icons.error_outline,
+        t.danger,
+        'Capture error',
       ),
     };
     return Tooltip(
